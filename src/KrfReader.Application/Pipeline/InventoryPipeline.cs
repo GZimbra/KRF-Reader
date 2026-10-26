@@ -267,13 +267,16 @@ public sealed class InventoryPipeline : IInventoryPipeline
                 return;
             }
 
-            if (string.IsNullOrEmpty(e.Read.Epc))
+            // Drivers de terceiros podem não normalizar; EPC inválido derrubaria o lote inteiro no repositório.
+            var epc = Epc.Normalize(e.Read.Epc);
+            if (epc is null)
             {
                 Interlocked.Increment(ref _filteredOut);
                 return;
             }
 
-            if (!rt.Input.Writer.TryWrite(PipelineMessage.ForRead(new StampedRead(e.Read, mode.Value, generation))))
+            var read = epc == e.Read.Epc ? e.Read : e.Read with { Epc = epc };
+            if (!rt.Input.Writer.TryWrite(PipelineMessage.ForRead(new StampedRead(read, mode.Value, generation))))
                 Interlocked.Increment(ref _queueDropped);
         }
         catch (Exception ex)

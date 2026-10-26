@@ -17,7 +17,7 @@ public sealed class PipelineOptions
     /// <summary>Workers paralelos de filtro/deduplicação (particionados por hash do EPC).</summary>
     public int WorkerCount { get; set; } = Math.Clamp(Environment.ProcessorCount / 2, 1, 4);
 
-    /// <summary>Capacidade da fila de entrada. Cheia = leitura descartada e contabilizada (DropWrite).</summary>
+    /// <summary>Capacidade da fila de entrada. Cheia = leitura descartada e contabilizada (TryWrite falha → QueueDropped).</summary>
     public int QueueCapacity { get; set; } = 10_000;
 
     /// <summary>Gravação dispara ao atingir este tamanho de lote...</summary>

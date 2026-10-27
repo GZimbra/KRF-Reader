@@ -32,6 +32,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private readonly IInventoryRepository _repository;
     private readonly Func<ReaderOptions, PipelineHandle> _pipelineFactory;
+    private readonly Func<ReaderOptions, Task> _saveReaderOptions;
     private readonly ReaderOptions _baseReaderOptions;
     private readonly PipelineOptions _pipelineOptions;
     private readonly ConcurrentQueue<LiveReadItem> _pendingLiveReads = new();
@@ -52,17 +53,24 @@ public sealed partial class MainWindowViewModel : ObservableObject
         IInventoryRepository repository,
         ITagCatalogRepository catalog,
         IReaderProtocolFactory protocolFactory,
+        IReaderModelCatalog readerModels,
         Func<ReaderOptions, PipelineHandle> pipelineFactory,
+        Func<ReaderOptions, Task> saveReaderOptions,
         ReaderOptions readerOptions,
         PipelineOptions pipelineOptions)
     {
         _repository = repository;
         _pipelineFactory = pipelineFactory;
+        _saveReaderOptions = saveReaderOptions;
         _baseReaderOptions = readerOptions;
         _pipelineOptions = pipelineOptions;
         Cadastro = new TagCatalogViewModel(catalog, CaptureForCatalogAsync);
 
         Protocols = protocolFactory.AvailableProtocols.ToArray();
+        ReaderModels = readerModels.Models;
+        // Sem disparar OnSelectedReaderModelChanged: os campos vêm das opções salvas, não dos padrões do modelo.
+        _selectedReaderModel = readerModels.Resolve(readerOptions);
+        RefreshSerialPorts();
 
         _readerTypeIndex = (int)readerOptions.Type;
         _selectedProtocol = Protocols.Contains(readerOptions.Protocol) ? readerOptions.Protocol : Protocols.FirstOrDefault();
@@ -322,6 +330,120 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string? _readerAntennasText;
     [ObservableProperty] private string? _configMessage;
 
+    // ── Modelo do leitor (catálogo) ──
+
+    public IReadOnlyList<ReaderModel> ReaderModels { get; }
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ModelPowerMin), nameof(ModelPowerMax), nameof(ModelPowerHint),
+        nameof(ModelValidationText), nameof(IsModelValidated), nameof(ModelSpecs), nameof(IsCustomModel))]
+    private ReaderModel _selectedReaderModel;
+
+    public bool IsCustomModel => SelectedReaderModel.IsCustom;
+    public bool IsModelValidated => SelectedReaderModel.Validated;
+    public string ModelValidationText => SelectedReaderModel.Validated ? "VALIDADO EM HARDWARE" : "NÃO VALIDADO EM HARDWARE";
+
+    public decimal ModelPowerMin => (decimal)(SelectedReaderModel.IsCustom ? 0 : SelectedReaderModel.MinPowerDbm);
+    public decimal ModelPowerMax => (decimal)(SelectedReaderModel.IsCustom ? 33 : SelectedReaderModel.MaxPowerDbm);
+    public string ModelPowerHint => $"{ModelPowerMin:0}–{ModelPowerMax:0} dBm neste modelo · controla o alcance";
+
+    /// <summary>Ficha técnica do modelo selecionado (rótulo, valor); itens vazios são omitidos.</summary>
+    public IReadOnlyList<SpecItem> ModelSpecs
+    {
+        get
+        {
+            var m = SelectedReaderModel;
+            var connection = m.Type switch
+            {
+                ReaderType.Serial => $"Serial · {m.DefaultBaudRate} baud 8N1",
+                ReaderType.Tcp => $"TCP/IP · porta {m.DefaultTcpPort}",
+                _ => "Simulado",
+            };
+            SpecItem[] items =
+            [
+                new("Família", m.Family),
+                new("Chip / firmware", m.Chip),
+                new("Interface", m.Interface),
+                new("Conexão padrão", connection),
+                new("Protocolo", m.Type == ReaderType.Mock ? "" : m.Protocol),
+                new("Quadro", m.FrameFormat),
+                new("Potência", m.IsCustom ? "" : $"{m.MinPowerDbm:0}–{m.MaxPowerDbm:0} dBm (padrão {m.DefaultPowerDbm:0})"),
+                new("Antenas", m.IsCustom ? "" : m.AntennaPorts.ToString(CultureInfo.InvariantCulture)),
+                new("Observações", m.Notes),
+            ];
+            return items.Where(i => !string.IsNullOrWhiteSpace(i.Value)).ToArray();
+        }
+    }
+
+    /// <summary>Selecionar um modelo preenche tipo, protocolo, conexão, potência e antenas com os padrões dele.</summary>
+    partial void OnSelectedReaderModelChanged(ReaderModel value)
+    {
+        if (value is null || value.IsCustom)
+            return;
+
+        ReaderTypeIndex = (int)value.Type;
+        if (value.Type != ReaderType.Mock && Protocols.Contains(value.Protocol, StringComparer.OrdinalIgnoreCase))
+            SelectedProtocol = Protocols.First(p => string.Equals(p, value.Protocol, StringComparison.OrdinalIgnoreCase));
+        if (value.Type == ReaderType.Serial)
+            BaudRate = value.DefaultBaudRate;
+        if (value.Type == ReaderType.Tcp)
+            TcpPort = value.DefaultTcpPort;
+        PowerDbm = (decimal)value.DefaultPowerDbm;
+        ReaderAntennasText = "1";
+        ConfigMessage = $"Padrões de \"{value.DisplayName}\" carregados. Clique em \"Aplicar leitor\" para conectar.";
+    }
+
+    // ── Portas seriais detectadas ──
+
+    [ObservableProperty] private IReadOnlyList<string> _availableSerialPorts = [];
+    [ObservableProperty] private string? _selectedAvailablePort;
+
+    partial void OnSelectedAvailablePortChanged(string? value)
+    {
+        if (!string.IsNullOrEmpty(value))
+            SerialPortName = value;
+    }
+
+    [RelayCommand]
+    private void RefreshSerialPorts()
+    {
+        try
+        {
+            AvailableSerialPorts = System.IO.Ports.SerialPort.GetPortNames()
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Order(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+        }
+        catch (Exception ex)
+        {
+            AvailableSerialPorts = [];
+            ConfigMessage = $"Não foi possível listar as portas seriais: {ex.Message}";
+        }
+    }
+
+    public string SettingsFilePath => ReaderSettingsStore.FilePath;
+
+    /// <summary>Grava o leitor configurado na tela em appsettings.Local.json (vale a partir da próxima abertura).</summary>
+    [RelayCommand]
+    private async Task SaveReaderAsDefaultAsync()
+    {
+        if (!TryBuildReaderOptions(out var options, out var error))
+        {
+            ConfigMessage = error;
+            return;
+        }
+
+        try
+        {
+            await Task.Run(() => _saveReaderOptions(options));
+            ConfigMessage = $"Salvo como padrão em {SettingsFilePath}. Vale na próxima abertura do app.";
+        }
+        catch (Exception ex)
+        {
+            ConfigMessage = $"Falha ao salvar: {ex.Message}";
+        }
+    }
+
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(MinRssiText))]
     private double _minRssi;
@@ -470,6 +592,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         options = new ReaderOptions
         {
+            Model = SelectedReaderModel.Id,
             Type = type,
             Protocol = SelectedProtocol ?? _baseReaderOptions.Protocol,
             Serial = serial,

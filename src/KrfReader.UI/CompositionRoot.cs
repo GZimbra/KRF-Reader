@@ -55,6 +55,7 @@ public sealed class CompositionRoot : IDisposable
     public IInventoryRepository Repository { get; }
     public ITagCatalogRepository Catalog { get; }
     public IReaderProtocolFactory ProtocolFactory { get; }
+    public IReaderModelCatalog ReaderModels { get; } = ReaderModelCatalog.Default;
 
     /// <summary>
     /// Carrega appsettings.json (obrigatório) e appsettings.Local.json (opcional, sobrescreve) de

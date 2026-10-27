@@ -12,6 +12,9 @@ public sealed class ReaderOptions
 {
     public const string SectionName = "Reader";
 
+    /// <summary>Id do perfil em <see cref="Readers.IReaderModelCatalog"/> (informativo; vazio = deduzido de Type/Protocol).</summary>
+    public string Model { get; set; } = "";
+
     public ReaderType Type { get; set; } = ReaderType.Mock;
 
     /// <summary>Nome do protocolo registrado em <see cref="Readers.IReaderProtocolFactory"/> (Serial/Tcp).</summary>

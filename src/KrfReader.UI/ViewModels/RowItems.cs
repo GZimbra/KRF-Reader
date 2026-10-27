@@ -76,3 +76,6 @@ public sealed class EventRowItem(InventoryEvent ev)
     public string Rssi { get; } = Display.Rssi(ev.Rssi);
     public bool IsAnomaly { get; } = ev.IsAnomaly;
 }
+
+/// <summary>Linha da ficha técnica do modelo de leitor (Configurações).</summary>
+public sealed record SpecItem(string Label, string Value);

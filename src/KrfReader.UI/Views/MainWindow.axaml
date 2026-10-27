@@ -1,8 +1,9 @@
-<Window xmlns="https://github.com/avaloniaui"
+﻿<Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:vm="using:KrfReader.UI.ViewModels"
+        xmlns:readers="using:KrfReader.Application.Readers"
         mc:Ignorable="d" d:DesignWidth="1200" d:DesignHeight="800"
         x:Class="KrfReader.UI.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
@@ -351,16 +352,36 @@
       </TabItem>
 
       <!-- ═══════════════════════ CONFIGURAÇÃO ═══════════════════════ -->
-      <TabItem Header="CONFIGURAÇÃO">
+      <TabItem Header="CONFIGURAÇÕES">
         <ScrollViewer>
-          <StackPanel Spacing="16" MaxWidth="760" HorizontalAlignment="Left">
+          <Grid ColumnDefinitions="*,420" ColumnSpacing="16">
+          <StackPanel Grid.Column="0" Spacing="16" MaxWidth="760" HorizontalAlignment="Left">
 
             <!-- Leitor: exige reaplicar -->
             <Border Classes="card" Padding="20">
               <StackPanel Spacing="10">
                 <TextBlock Classes="sectionTitle" Text="LEITOR RFID" />
                 <TextBlock Classes="muted" TextWrapping="Wrap"
-                           Text="Tipo, conexão, protocolo, potência e antenas só valem após clicar em &quot;Aplicar leitor&quot; (o leitor é desconectado e reconectado). Exige o modo PARADO." />
+                           Text="Escolha o modelo para carregar os padrões. Tudo abaixo só vale após &quot;Aplicar leitor&quot; (reconecta o leitor; exige modo PARADO)." />
+
+                <Grid ColumnDefinitions="180,*">
+                  <TextBlock Text="Modelo" VerticalAlignment="Center" />
+                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                    <ComboBox Width="340" ItemsSource="{Binding ReaderModels}" SelectedItem="{Binding SelectedReaderModel}">
+                      <ComboBox.ItemTemplate>
+                        <DataTemplate x:DataType="readers:ReaderModel">
+                          <TextBlock Text="{Binding DisplayName}" />
+                        </DataTemplate>
+                      </ComboBox.ItemTemplate>
+                    </ComboBox>
+                    <Border VerticalAlignment="Center" CornerRadius="2" Padding="8,3" BorderThickness="1"
+                            BorderBrush="{StaticResource HairlineBrush}">
+                      <TextBlock FontSize="10" FontWeight="Bold" LetterSpacing="1"
+                                 Classes="status" Classes.dentro="{Binding IsModelValidated}"
+                                 Text="{Binding ModelValidationText}" />
+                    </Border>
+                  </StackPanel>
+                </Grid>
 
                 <Grid ColumnDefinitions="180,*">
                   <TextBlock Text="Tipo de leitor" VerticalAlignment="Center" />
@@ -383,6 +404,16 @@
                   </StackPanel>
                 </Grid>
 
+                <Grid ColumnDefinitions="180,*" IsVisible="{Binding IsSerialSelected}">
+                  <TextBlock Text="Portas detectadas" VerticalAlignment="Center" />
+                  <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                    <ComboBox Width="200" PlaceholderText="nenhuma / escolher"
+                              ItemsSource="{Binding AvailableSerialPorts}" SelectedItem="{Binding SelectedAvailablePort}" />
+                    <Button Classes="ghost" Content="Atualizar" Command="{Binding RefreshSerialPortsCommand}"
+                            ToolTip.Tip="Lista de novo as portas COM (após plugar/desplugar o leitor)" />
+                  </StackPanel>
+                </Grid>
+
                 <Grid ColumnDefinitions="180,*" IsVisible="{Binding IsTcpSelected}">
                   <TextBlock Text="Host / porta TCP" VerticalAlignment="Center" />
                   <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
@@ -395,9 +426,9 @@
                 <Grid ColumnDefinitions="180,*">
                   <TextBlock Text="Potência (dBm)" VerticalAlignment="Center" />
                   <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
-                    <NumericUpDown Width="170" Minimum="0" Maximum="33" Increment="1"
+                    <NumericUpDown Width="170" Minimum="{Binding ModelPowerMin}" Maximum="{Binding ModelPowerMax}" Increment="1"
                                    FormatString="0" Value="{Binding PowerDbm}" />
-                    <TextBlock Classes="muted" VerticalAlignment="Center" Text="0–33 dBm · controla o alcance (exige reaplicar)" />
+                    <TextBlock Classes="muted" VerticalAlignment="Center" Text="{Binding ModelPowerHint}" />
                   </StackPanel>
                 </Grid>
 
@@ -411,6 +442,8 @@
 
                 <StackPanel Orientation="Horizontal" Spacing="12">
                   <Button Content="Aplicar leitor" Classes="accent" Command="{Binding ApplyReaderCommand}" />
+                  <Button Content="Salvar como padrão" Classes="ghost" Command="{Binding SaveReaderAsDefaultCommand}"
+                          ToolTip.Tip="{Binding SettingsFilePath, StringFormat='Grava em {0}; vale na próxima abertura'}" />
                   <TextBlock VerticalAlignment="Center" Classes="error" IsVisible="{Binding IsModeActive}"
                              Text="Modo ativo: pressione PARAR antes de trocar o leitor." />
                 </StackPanel>
@@ -443,6 +476,42 @@
               </StackPanel>
             </Border>
           </StackPanel>
+
+          <!-- Informações técnicas do modelo + guia de troca -->
+          <StackPanel Grid.Column="1" Spacing="16">
+            <Border Classes="card" Padding="20">
+              <StackPanel Spacing="10">
+                <TextBlock Classes="sectionTitle" Text="INFORMAÇÕES TÉCNICAS" />
+                <TextBlock Classes="panelTitle" Text="{Binding SelectedReaderModel.DisplayName}" TextWrapping="Wrap" />
+                <ItemsControl ItemsSource="{Binding ModelSpecs}">
+                  <ItemsControl.ItemTemplate>
+                    <DataTemplate x:DataType="vm:SpecItem">
+                      <StackPanel Margin="0,4">
+                        <TextBlock Classes="cardLabel" Text="{Binding Label}" />
+                        <TextBlock Text="{Binding Value}" TextWrapping="Wrap" />
+                      </StackPanel>
+                    </DataTemplate>
+                  </ItemsControl.ItemTemplate>
+                </ItemsControl>
+              </StackPanel>
+            </Border>
+
+            <Border Classes="card" Padding="20">
+              <StackPanel Spacing="8">
+                <TextBlock Classes="sectionTitle" Text="TROCA DE LEITOR" />
+                <TextBlock TextWrapping="Wrap" Text="1. Pressione PARAR na aba Operação." />
+                <TextBlock TextWrapping="Wrap" Text="2. Conecte o leitor novo. Em USB, clique em Atualizar e escolha a porta COM." />
+                <TextBlock TextWrapping="Wrap" Text="3. Escolha o modelo. Se não estiver na lista, use Personalizado e o protocolo que o fabricante indica." />
+                <TextBlock TextWrapping="Wrap" Text="4. Aplicar leitor. Conectado: leia uma tag na aba Cadastro (Ler tag) para conferir." />
+                <TextBlock TextWrapping="Wrap" Text="5. Salvar como padrão, para abrir assim da próxima vez." />
+                <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap" Margin="0,6,0,0"
+                           Text="Protocolo não suportado: implementar IReaderProtocol em Infrastructure/Readers/Protocols, registrar em ReaderProtocolFactory e acrescentar o modelo em ReaderModelCatalog." />
+                <TextBlock Classes="muted" FontSize="12" TextWrapping="Wrap"
+                           Text="Leitores UHF: nunca transmita sem antena conectada." />
+              </StackPanel>
+            </Border>
+          </StackPanel>
+          </Grid>
         </ScrollViewer>
       </TabItem>
     </TabControl>

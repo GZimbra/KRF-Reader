@@ -22,7 +22,9 @@ public partial class App : Avalonia.Application
                 _root.Repository,
                 _root.Catalog,
                 _root.ProtocolFactory,
+                _root.ReaderModels,
                 _root.CreatePipeline,
+                options => ReaderSettingsStore.SaveAsync(options),
                 _root.ReaderOptions,
                 _root.PipelineOptions);
 

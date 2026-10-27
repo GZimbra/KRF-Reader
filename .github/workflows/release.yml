@@ -1,0 +1,37 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Testes
+        run: dotnet test KrfReader.sln -c Release
+
+      - name: Publish self-contained
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          for rid in win-x64 linux-x64; do
+            dotnet publish src/KrfReader.UI -c Release -r "$rid" --self-contained \
+              -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none -p:Version="$VERSION" -o "publish/$rid"
+            (cd "publish/$rid" && zip -qr "../../KrfReader-$GITHUB_REF_NAME-$rid.zip" .)
+          done
+          sha256sum KrfReader-*.zip > SHA256SUMS.txt
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            KrfReader-*.zip
+            SHA256SUMS.txt

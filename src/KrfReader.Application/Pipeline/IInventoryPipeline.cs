@@ -38,6 +38,14 @@ public interface IInventoryPipeline : IAsyncDisposable
     /// <summary>Shutdown limpo: para leitor, drena filas, persiste o pendente e encerra as tasks.</summary>
     Task StopAsync(CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Captura de tags para cadastro. Exige inventário PARADO (senão <see cref="InvalidOperationException"/>):
+    /// liga o leitor por <paramref name="window"/>, coleta as leituras que passam no filtro de RSSI/antena e
+    /// desliga o leitor. Nada vai para a fila nem para o banco: a captura não altera estoque.
+    /// Serializada com troca de modo (ENTRADA/SAÍDA esperam a captura terminar).
+    /// </summary>
+    Task<TagCaptureResult> CaptureAsync(TimeSpan window, CancellationToken cancellationToken = default);
+
     /// <summary>Atualiza filtro em tempo real (thread-safe).</summary>
     void UpdateFilter(double minRssi, IReadOnlyCollection<int> allowedAntennas);
 
@@ -68,3 +76,16 @@ public sealed record PipelineStats(
     long QueueDropped,
     long Persisted,
     int DistinctEpcsSession);
+
+/// <summary>Tag vista durante <see cref="IInventoryPipeline.CaptureAsync"/>.</summary>
+/// <param name="AntennaId">Antena da leitura de maior RSSI.</param>
+public sealed record CapturedTag(string Epc, double MaxRssi, int Reads, int AntennaId);
+
+/// <summary>Tags capturadas, maior RSSI primeiro (a mais próxima da antena tende a ser a primeira).</summary>
+public sealed record TagCaptureResult(IReadOnlyList<CapturedTag> Tags)
+{
+    public CapturedTag? Strongest => Tags.Count > 0 ? Tags[0] : null;
+
+    /// <summary>Mais de uma tag no campo: o operador precisa confirmar qual é.</summary>
+    public bool IsAmbiguous => Tags.Count > 1;
+}

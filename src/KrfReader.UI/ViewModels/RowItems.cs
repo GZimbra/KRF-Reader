@@ -53,6 +53,8 @@ public sealed class LiveReadItem
 public sealed class TagRowItem(TagState state)
 {
     public string Epc { get; } = state.Epc;
+    public string Descricao { get; } = state.Descricao ?? "não cadastrada";
+    public bool IsRegistered { get; } = state.IsRegistered;
     public string Status { get; } = Display.Status(state.Status);
     public bool IsDentro { get; } = state.Status == TagStatus.Dentro;
     public string UltimaLeitura { get; } = Display.LocalTime(state.UltimaLeituraUtc, "dd/MM/yyyy HH:mm:ss");

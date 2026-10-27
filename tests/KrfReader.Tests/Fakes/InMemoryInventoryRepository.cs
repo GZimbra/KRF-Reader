@@ -128,13 +128,13 @@ public sealed class InMemoryInventoryRepository : IInventoryRepository
         }
     }
 
-    public Task<IReadOnlyList<TagState>> QueryTagsAsync(TagStatus? status, string? epcContains, int limit = 500, CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<TagState>> QueryTagsAsync(TagStatus? status, string? search, int limit = 500, CancellationToken cancellationToken = default)
     {
         lock (_sync)
         {
             IReadOnlyList<TagState> list = _tags.Values
                 .Where(t => status is null || t.Status == status)
-                .Where(t => epcContains is null || t.Epc.Contains(epcContains, StringComparison.OrdinalIgnoreCase))
+                .Where(t => search is null || t.Epc.Contains(search, StringComparison.OrdinalIgnoreCase))
                 .Take(limit)
                 .ToArray();
             return Task.FromResult(list);

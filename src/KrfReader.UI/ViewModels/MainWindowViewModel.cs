@@ -27,6 +27,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private static readonly char[] AntennaSeparators = [',', ';', ' '];
     private static readonly TimeSpan CountersMinInterval = TimeSpan.FromSeconds(1);
 
+    /// <summary>Janela de leitura do botão "Ler tag" do cadastro.</summary>
+    private static readonly TimeSpan CaptureWindow = TimeSpan.FromMilliseconds(1500);
+
     private readonly IInventoryRepository _repository;
     private readonly Func<ReaderOptions, PipelineHandle> _pipelineFactory;
     private readonly ReaderOptions _baseReaderOptions;
@@ -47,6 +50,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     public MainWindowViewModel(
         IInventoryRepository repository,
+        ITagCatalogRepository catalog,
         IReaderProtocolFactory protocolFactory,
         Func<ReaderOptions, PipelineHandle> pipelineFactory,
         ReaderOptions readerOptions,
@@ -56,6 +60,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _pipelineFactory = pipelineFactory;
         _baseReaderOptions = readerOptions;
         _pipelineOptions = pipelineOptions;
+        Cadastro = new TagCatalogViewModel(catalog, CaptureForCatalogAsync);
 
         Protocols = protocolFactory.AvailableProtocols.ToArray();
 
@@ -166,6 +171,12 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
     }
 
+    // ───────────────────────── Abas ─────────────────────────
+
+    public const int CadastroTabIndex = 2;
+
+    [ObservableProperty] private int _selectedTabIndex;
+
     // ───────────────────────── Consulta ─────────────────────────
 
     public string[] StatusFilterOptions { get; } = ["Todos", "DENTRO", "FORA"];
@@ -207,6 +218,61 @@ public sealed partial class MainWindowViewModel : ObservableObject
     }
 
     partial void OnSelectedTagChanged(TagRowItem? value) => _ = LoadHistoryAsync(value);
+
+    /// <summary>Abre a tag selecionada na aba Cadastro (novo cadastro ou edição, se já cadastrada).</summary>
+    [RelayCommand]
+    private async Task RegisterSelectedTagAsync()
+    {
+        if (SelectedTag is not { } tag)
+            return;
+        SelectedTabIndex = CadastroTabIndex;
+        await Cadastro.OpenEpcAsync(tag.Epc);
+    }
+
+    // ───────────────────────── Cadastro ─────────────────────────
+
+    public TagCatalogViewModel Cadastro { get; }
+
+    /// <summary>
+    /// Captura para o cadastro. Usa o mesmo lock de troca de modo/leitor: com a captura rodando, ENTRADA/SAÍDA
+    /// ficam bloqueados, e vice-versa. Retorna null (com o motivo na aba Cadastro) quando não pode capturar.
+    /// </summary>
+    private async Task<TagCaptureResult?> CaptureForCatalogAsync()
+    {
+        if (ActiveMode is not null)
+        {
+            Cadastro.ReportCaptureUnavailable(
+                $"Modo {Display.Mode(ActiveMode)} ativo: a leitura seria gravada no estoque. Pressione PARAR na aba Operação antes de ler para cadastro.");
+            return null;
+        }
+
+        if (!await _lifecycleLock.WaitAsync(0))
+        {
+            Cadastro.ReportCaptureUnavailable("Leitor ocupado (troca de modo ou de leitor em andamento). Tente de novo.");
+            return null;
+        }
+
+        IsBusy = true;
+        try
+        {
+            var handle = _current;
+            if (handle is null || !IsPipelineRunning || _shutdownStarted)
+            {
+                Cadastro.ReportCaptureUnavailable("Leitor não conectado. Verifique a aba Configuração.");
+                return null;
+            }
+
+            StatusMessage = "Lendo tag para cadastro...";
+            var result = await Task.Run(() => handle.Pipeline.CaptureAsync(CaptureWindow));
+            StatusMessage = $"Leitura para cadastro: {result.Tags.Count} tag(s) no campo.";
+            return result;
+        }
+        finally
+        {
+            IsBusy = false;
+            _lifecycleLock.Release();
+        }
+    }
 
     private async Task LoadHistoryAsync(TagRowItem? tag)
     {
@@ -457,6 +523,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             if (!await TryInitializeRepositoryAsync())
                 return;
 
+            _ = Cadastro.LoadAsync();
             await ReloadCountersAsync();
             await StartPipelineAsync(_baseReaderOptions);
         }

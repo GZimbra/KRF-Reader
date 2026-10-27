@@ -40,7 +40,9 @@ public sealed class CompositionRoot : IDisposable
         if (!string.Equals(databaseOptions.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase))
             throw new NotSupportedException($"Database:Provider '{databaseOptions.Provider}' não suportado (apenas Sqlite).");
 
-        Repository = new SqliteInventoryRepository(databaseOptions, LoggerFactory.CreateLogger<SqliteInventoryRepository>());
+        var sqlite = new SqliteInventoryRepository(databaseOptions, LoggerFactory.CreateLogger<SqliteInventoryRepository>());
+        Repository = sqlite;
+        Catalog = sqlite;
         ProtocolFactory = new ReaderProtocolFactory();
         _readerFactory = new RfidReaderFactory(ProtocolFactory, LoggerFactory);
     }
@@ -51,6 +53,7 @@ public sealed class CompositionRoot : IDisposable
     public DatabaseOptions DatabaseOptions { get; }
     public ILoggerFactory LoggerFactory { get; }
     public IInventoryRepository Repository { get; }
+    public ITagCatalogRepository Catalog { get; }
     public IReaderProtocolFactory ProtocolFactory { get; }
 
     /// <summary>

@@ -3,6 +3,11 @@ name: Release
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag da release (ex.: v0.2.0). Criada no commit escolhido se não existir.'
+        required: true
 
 permissions:
   contents: write
@@ -10,6 +15,8 @@ permissions:
 jobs:
   release:
     runs-on: ubuntu-latest
+    env:
+      TAG: ${{ inputs.tag || github.ref_name }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-dotnet@v4
@@ -21,16 +28,19 @@ jobs:
 
       - name: Publish self-contained
         run: |
-          VERSION="${GITHUB_REF_NAME#v}"
+          VERSION="${TAG#v}"
           for rid in win-x64 linux-x64; do
             dotnet publish src/KrfReader.UI -c Release -r "$rid" --self-contained \
               -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:DebugType=none -p:Version="$VERSION" -o "publish/$rid"
-            (cd "publish/$rid" && zip -qr "../../KrfReader-$GITHUB_REF_NAME-$rid.zip" .)
+            (cd "publish/$rid" && zip -qr "../../KrfReader-$TAG-$rid.zip" .)
           done
           sha256sum KrfReader-*.zip > SHA256SUMS.txt
 
       - uses: softprops/action-gh-release@v2
         with:
+          tag_name: ${{ env.TAG }}
+          target_commitish: ${{ github.sha }}
+          name: KRF Reader ${{ env.TAG }}
           generate_release_notes: true
           files: |
             KrfReader-*.zip

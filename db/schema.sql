@@ -12,6 +12,9 @@
 --               (CRIACAO, MUDANCA_STATUS) e anomalia (SAIDA_SEM_ENTRADA).
 --               Releitura idempotente (tag DENTRO lida em ENTRADA, FORA lida em SAIDA)
 --               NÃO gera evento: apenas atualiza Tags.UltimaLeitura.
+--   * TagCadastro = dado mestre informado pelo operador (descrição, SKU, observação).
+--               Independe de Tags: sem FK nos dois sentidos. Uma tag pode estar cadastrada e nunca ter
+--               sido lida, ou ter sido lida sem cadastro. Não participa da regra de transição/anomalia.
 --
 -- Datas: TEXT em ISO-8601 UTC com milissegundos, formato fixo 'yyyy-MM-ddTHH:mm:ss.fffZ'
 --   (ex.: '2026-10-26T13:45:07.123Z'). Largura fixa => ordenação lexicográfica = cronológica,
@@ -46,6 +49,18 @@ CREATE TABLE IF NOT EXISTS Eventos (
     Rssi      REAL    NOT NULL,
     FOREIGN KEY (EpcId) REFERENCES Tags (EpcId)
 );
+
+CREATE TABLE IF NOT EXISTS TagCadastro (
+    EpcId        TEXT NOT NULL PRIMARY KEY,
+    Descricao    TEXT NOT NULL CHECK (length(Descricao) BETWEEN 1 AND 200),
+    Sku          TEXT NULL     CHECK (Sku IS NULL OR length(Sku) <= 64),
+    Observacao   TEXT NULL     CHECK (Observacao IS NULL OR length(Observacao) <= 500),
+    CadastradoEm TEXT NOT NULL,
+    AtualizadoEm TEXT NOT NULL
+);
+
+-- Busca por SKU no cadastro.
+CREATE INDEX IF NOT EXISTS IX_TagCadastro_Sku ON TagCadastro (Sku);
 
 -- Contadores DENTRO/FORA e filtro por status na consulta.
 CREATE INDEX IF NOT EXISTS IX_Tags_Status ON Tags (Status);

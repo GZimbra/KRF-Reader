@@ -50,6 +50,7 @@ public sealed class InventoryPipeline : IInventoryPipeline
     private ConcurrentDictionary<string, byte> _distinctEpcs = new(StringComparer.Ordinal);
 
     private volatile Runtime? _runtime;
+    private volatile CaptureSession? _capture;
     private bool _disposed;
 
     public InventoryPipeline(
@@ -239,6 +240,48 @@ public sealed class InventoryPipeline : IInventoryPipeline
         }
     }
 
+    public async Task<TagCaptureResult> CaptureAsync(TimeSpan window, CancellationToken cancellationToken = default)
+    {
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(window, TimeSpan.Zero, nameof(window));
+
+        await _control.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_runtime is null)
+                throw new InvalidOperationException("Pipeline não iniciado: chame StartAsync antes.");
+            if (_modeState.Mode is not null)
+                throw new InvalidOperationException("Captura exige o inventário PARADO.");
+
+            var session = new CaptureSession();
+            _capture = session;
+            try
+            {
+                await _reader.StartInventoryAsync(cancellationToken).ConfigureAwait(false);
+                try
+                {
+                    await Task.Delay(window, _time, cancellationToken).ConfigureAwait(false);
+                }
+                finally
+                {
+                    await StopReaderInventoryAsync(CancellationToken.None).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                _capture = null;
+            }
+
+            var result = session.ToResult();
+            _logger.LogInformation("Captura: {Count} tag(s) em {Window} ms", result.Tags.Count, window.TotalMilliseconds);
+            return result;
+        }
+        finally
+        {
+            _control.Release();
+        }
+    }
+
     public void UpdateFilter(double minRssi, IReadOnlyCollection<int> allowedAntennas) =>
         _filter.Update(minRssi, allowedAntennas);
 
@@ -261,6 +304,12 @@ public sealed class InventoryPipeline : IInventoryPipeline
             Interlocked.Increment(ref _rawReads);
             var rt = _runtime;
             var (mode, generation) = _modeState.Snapshot();
+            if (rt is not null && mode is null && _capture is { } capture)
+            {
+                OnCaptureRead(capture, e.Read);
+                return;
+            }
+
             if (rt is null || mode is null)
             {
                 Interlocked.Increment(ref _staleDiscarded);
@@ -283,6 +332,26 @@ public sealed class InventoryPipeline : IInventoryPipeline
         {
             _logger.LogError(ex, "Erro inesperado ao enfileirar leitura");
         }
+    }
+
+    /// <summary>Captura: mesmo filtro do inventário, sem dedup (a contagem de leituras é informação útil).</summary>
+    private void OnCaptureRead(CaptureSession capture, TagRead raw)
+    {
+        var epc = Epc.Normalize(raw.Epc);
+        if (epc is null)
+        {
+            Interlocked.Increment(ref _filteredOut);
+            return;
+        }
+
+        var read = raw with { Epc = epc };
+        if (!_filter.Accept(read))
+        {
+            Interlocked.Increment(ref _filteredOut);
+            return;
+        }
+
+        capture.Add(read);
     }
 
     private void OnReaderError(object? sender, ReaderErrorEventArgs e) =>
@@ -805,5 +874,36 @@ public sealed class InventoryPipeline : IInventoryPipeline
         }
 
         public void Clear() => _items.Clear();
+    }
+
+    /// <summary>Acumulador da captura. Escrito na thread do leitor, lido após o leitor parar.</summary>
+    private sealed class CaptureSession
+    {
+        private readonly object _gate = new();
+        private readonly Dictionary<string, CapturedTag> _tags = new(StringComparer.Ordinal);
+
+        public void Add(in TagRead read)
+        {
+            lock (_gate)
+            {
+                _tags[read.Epc] = _tags.TryGetValue(read.Epc, out var seen)
+                    ? read.Rssi > seen.MaxRssi
+                        ? new CapturedTag(read.Epc, read.Rssi, seen.Reads + 1, read.AntennaId)
+                        : seen with { Reads = seen.Reads + 1 }
+                    : new CapturedTag(read.Epc, read.Rssi, 1, read.AntennaId);
+            }
+        }
+
+        public TagCaptureResult ToResult()
+        {
+            lock (_gate)
+            {
+                return new TagCaptureResult(_tags.Values
+                    .OrderByDescending(t => t.MaxRssi)
+                    .ThenByDescending(t => t.Reads)
+                    .ThenBy(t => t.Epc, StringComparer.Ordinal)
+                    .ToArray());
+            }
+        }
     }
 }

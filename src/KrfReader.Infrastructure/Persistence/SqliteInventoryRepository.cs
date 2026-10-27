@@ -13,8 +13,9 @@ namespace KrfReader.Infrastructure.Persistence;
 /// <summary>
 /// <see cref="IInventoryRepository"/> sobre SQLite (Microsoft.Data.Sqlite + Dapper).
 /// Uma conexão nova por operação (o provider faz pooling). Thread-safe: não guarda estado mutável.
+/// Também implementa <see cref="ITagCatalogRepository"/> (SqliteInventoryRepository.Catalog.cs): mesmo banco e schema.
 /// </summary>
-public sealed class SqliteInventoryRepository : IInventoryRepository
+public sealed partial class SqliteInventoryRepository : IInventoryRepository, ITagCatalogRepository
 {
     internal const string SchemaResourceName = "KrfReader.Infrastructure.schema.sql";
 
@@ -197,18 +198,23 @@ public sealed class SqliteInventoryRepository : IInventoryRepository
         return new InventoryCounters(checked((int)row.Dentro), checked((int)row.Fora), checked((int)row.Anomalias));
     }
 
-    public async Task<IReadOnlyList<TagState>> QueryTagsAsync(TagStatus? status, string? epcContains, int limit = 500, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<TagState>> QueryTagsAsync(TagStatus? status, string? search, int limit = 500, CancellationToken cancellationToken = default)
     {
         if (limit <= 0)
             return [];
 
-        var term = string.IsNullOrWhiteSpace(epcContains) ? null : epcContains.Trim().ToUpperInvariant();
+        var term = string.IsNullOrWhiteSpace(search) ? null : search.Trim().ToUpperInvariant();
+        // LEFT JOIN: tag lida sem cadastro aparece com Descricao/Sku nulos.
         var sql = """
-            SELECT EpcId, Status, UltimaLeitura, UltimaAtualizacaoStatus
-            FROM Tags
-            WHERE (@Status IS NULL OR Status = @Status)
-              AND (@Pattern IS NULL OR EpcId LIKE @Pattern ESCAPE '\')
-            ORDER BY UltimaLeitura DESC
+            SELECT t.EpcId, t.Status, t.UltimaLeitura, t.UltimaAtualizacaoStatus, c.Descricao, c.Sku
+            FROM Tags t
+            LEFT JOIN TagCadastro c ON c.EpcId = t.EpcId
+            WHERE (@Status IS NULL OR t.Status = @Status)
+              AND (@Pattern IS NULL
+                   OR t.EpcId LIKE @Pattern ESCAPE '\'
+                   OR c.Descricao LIKE @Pattern ESCAPE '\'
+                   OR c.Sku LIKE @Pattern ESCAPE '\')
+            ORDER BY t.UltimaLeitura DESC
             LIMIT @Limit
             """;
 
@@ -224,7 +230,9 @@ public sealed class SqliteInventoryRepository : IInventoryRepository
             r.EpcId,
             DbLiterals.ParseStatus(r.Status),
             DbTimestamp.FromDb(r.UltimaLeitura),
-            DbTimestamp.FromDb(r.UltimaAtualizacaoStatus))).ToList();
+            DbTimestamp.FromDb(r.UltimaAtualizacaoStatus),
+            r.Descricao,
+            r.Sku)).ToList();
     }
 
     public async Task<IReadOnlyList<InventoryEvent>> GetEventsAsync(string epc, int limit = 200, CancellationToken cancellationToken = default)
@@ -343,6 +351,8 @@ public sealed class SqliteInventoryRepository : IInventoryRepository
         public string Status { get; init; } = "";
         public string UltimaLeitura { get; init; } = "";
         public string UltimaAtualizacaoStatus { get; init; } = "";
+        public string? Descricao { get; init; }
+        public string? Sku { get; init; }
     }
 
     private sealed record TagUpsertRow

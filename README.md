@@ -31,6 +31,7 @@ A tag carrega apenas o EPC. Toda a lógica de estoque fica no sistema e no banco
 - [Uso](#uso)
 - [Configuração](#configuração-srckrfreaderuiappsettingsjson)
 - [Regras de negócio](#regras-de-negócio-implementadas)
+- [Cadastro de tags](#cadastro-de-tags)
 - [Arquitetura](#arquitetura)
 - [Leitor real e novos drivers](#como-configurar-o-leitor-real)
 - [Trocar o banco](#trocar-o-banco-sql-server--postgresql)
@@ -42,9 +43,9 @@ A tag carrega apenas o EPC. Toda a lógica de estoque fica no sistema e no banco
 
 ## Telas
 
-| Operação | Consulta | Configuração |
-|---|---|---|
-| ![Operação](docs/screenshots/operacao.png) | ![Consulta](docs/screenshots/consulta.png) | ![Configuração](docs/screenshots/configuracao.png) |
+| Operação | Consulta | Cadastro | Configuração |
+|---|---|---|---|
+| ![Operação](docs/screenshots/operacao.png) | ![Consulta](docs/screenshots/consulta.png) | ![Cadastro](docs/screenshots/cadastro.png) | ![Configuração](docs/screenshots/configuracao.png) |
 
 ## Início rápido
 
@@ -64,7 +65,9 @@ O banco SQLite (`krf-reader.db`) é criado no diretório de execução, com o sc
 
 **OPERAÇÃO.** Botões ENTRADA, SAÍDA e PARAR. Mostra o modo ativo, o status do leitor, os contadores (tags dentro, tags fora, lidas nesta sessão) e as últimas 200 leituras aplicadas, com EPC, antena, RSSI e resultado. Saída aparece em vermelho; anomalias (saída sem entrada) ficam num painel separado.
 
-**CONSULTA.** Busca por trecho de EPC. Mostra status atual, última leitura e última mudança de cada tag.
+**CONSULTA.** Busca por trecho de EPC, descrição ou SKU. Mostra descrição do cadastro, status atual, última leitura e última mudança de cada tag.
+
+**CADASTRO.** Cadastra tags com descrição, SKU e observação, digitando o EPC ou lendo a tag no leitor. Detalhes em [Cadastro de tags](#cadastro-de-tags).
 
 **CONFIGURAÇÃO.** Duas partes:
 
@@ -111,16 +114,27 @@ Leitor, porta e potência também podem ser trocados na aba **Configuração**, 
 - `Eventos` guarda (EPC, modo, tipo, timestamp, antena, RSSI) de toda mudança de estado e anomalia. `Tags` é a projeção do estado atual, atualizada **na mesma transação** que o evento.
 - **Deduplicação**: a mesma tag na mesma *sessão de modo* dentro de `DedupWindowSeconds` é ignorada antes de chegar ao banco. A chave usa a geração, e não apenas o modo. Com uma chave só por modo, ENTRADA → SAÍDA → ENTRADA em menos de N segundos faria a segunda entrada ser ignorada.
 
+## Cadastro de tags
+
+Aba **Cadastro**: associa ao EPC uma descrição (obrigatória), SKU e observação. Tabela `TagCadastro`, separada de `Tags`.
+
+- **Manual**: digite o EPC. Aceita espaços, `-` e `:`; exige hex com tamanho múltiplo de 4 dígitos (palavras de 16 bits do Gen2), de 4 a 124. EPC-96 = 24 dígitos.
+- **Ler tag**: liga o leitor por 1,5 s com o inventário **PARADO**, aplica o mesmo filtro de RSSI/antena e preenche o EPC de maior RSSI. Se houver mais de uma tag no campo, todas aparecem para escolha. Nada é gravado em `Tags`/`Eventos`. ENTRADA/SAÍDA ficam bloqueados durante a captura, e a captura é recusada com modo ativo.
+- EPC já cadastrado abre em edição. Remover o cadastro **não** apaga status nem histórico da tag.
+- Na **Consulta**, cada tag mostra a descrição (ou "não cadastrada"), a busca casa EPC, descrição ou SKU, e "Cadastro desta tag" abre a tag selecionada na aba Cadastro.
+
+**O cadastro não altera a regra de estoque.** Tag cadastrada e nunca lida em ENTRADA, quando lida em SAÍDA, continua sendo `SAIDA_SEM_ENTRADA`; tag não cadastrada lida em ENTRADA continua sendo criada como DENTRO. Ver "Decisões de arquitetura".
+
 ## Arquitetura
 
 ```
 src/
-  KrfReader.Domain/           Regra pura (InventoryRules.Decide), enums, TagRead, Epc. Sem dependências.
-  KrfReader.Application/      Contratos (IRfidReader, IReaderProtocol, IInventoryRepository, IInventoryPipeline),
+  KrfReader.Domain/           Regra pura (InventoryRules.Decide, TagRegistrationRules), enums, TagRead, Epc. Sem dependências.
+  KrfReader.Application/      Contratos (IRfidReader, IReaderProtocol, IInventoryRepository, ITagCatalogRepository, IInventoryPipeline),
                               Options e o pipeline concorrente (InventoryPipeline, Deduplicator, ReadFilter, ModeState).
   KrfReader.Infrastructure/
     Readers/                  MockReader, GenericSerialReader, GenericTcpReader, protocolos plugáveis, factories.
-    Persistence/              SqliteInventoryRepository (Dapper, upsert em lote).
+    Persistence/              SqliteInventoryRepository (Dapper, upsert em lote; cadastro de tags em .Catalog.cs).
   KrfReader.UI/               Avalonia 11 (MVVM), composition root, appsettings.json.
 tests/KrfReader.Tests/        xUnit: domínio, dedup, troca de modo, idempotência, anomalia, SQLite, parser, ponta a ponta.
 db/schema.sql                 Script de criação do banco (também embutido e aplicado no start).
@@ -211,6 +225,7 @@ Notas de tipo estão em `db/schema.sql`.
 - **`Eventos` não registra releitura idempotente.** "Todo evento no histórico" combinado com "releitura não gera evento" só é consistente se o histórico for de mudanças de estado. Registrar toda leitura deduplicada geraria 1 linha a cada `DedupWindowSeconds` por tag parada no campo, ou seja, o mesmo flood que a deduplicação deveria evitar. A última leitura fica em `Tags.UltimaLeitura`.
 - **Descarte na troca de modo.** Como cada leitura já carrega o próprio modo, seria seguro persistir o pendente da geração anterior com o modo dela. O descarte perde leituras válidas feitas logo antes do clique. Ele foi mantido por ser requisito explícito e é trivial de mudar em `InventoryPipeline`.
 - **Dapper com upsert em lote numa transação.** No SQLite, executar o mesmo comando preparado N vezes dentro de uma transação é a forma mais rápida de fazer upsert. Não existe ganho real em montar um `VALUES` multi-linha.
+- **Cadastro fora da regra de transição.** `TagCadastro` não tem FK com `Tags` e não entra em `InventoryRules.Decide`. Duas mudanças possíveis, não implementadas por mudarem o comportamento em operação: (a) bloquear ou sinalizar como anomalia tag **não cadastrada** lida em ENTRADA (exige novo `Tipo` em `Eventos`, cujo `CHECK` obriga recriar a tabela no SQLite); (b) cadastrar já com status inicial DENTRO, para que a primeira SAÍDA de tag cadastrada vire `MUDANCA_STATUS`. Esta última falsifica `UltimaLeitura` (a tag nunca foi lida) e por isso foi evitada.
 
 ## Testes
 
@@ -218,13 +233,13 @@ Notas de tipo estão em `db/schema.sql`.
 dotnet test KrfReader.sln
 ```
 
-90 testes em xUnit (`tests/KrfReader.Tests`), sem hardware e sem rede:
+168 testes em xUnit (`tests/KrfReader.Tests`), sem hardware e sem rede:
 
 | Pasta | Cobre |
 |---|---|
-| `Domain/` | `InventoryRules.Decide` (tabela completa), normalização de EPC, literais do banco |
-| `Pipeline/` | Deduplicação por geração, filtro RSSI/antena, troca de modo, barreira de PARAR, shutdown, concorrência do estado de modo |
-| `Persistence/` | `SqliteInventoryRepository` contra SQLite real: criação, mudança de status, idempotência, anomalia, lote de 2000 leituras, consultas |
+| `Domain/` | `InventoryRules.Decide` (tabela completa), normalização de EPC, validação do cadastro, literais do banco |
+| `Pipeline/` | Deduplicação por geração, filtro RSSI/antena, troca de modo, barreira de PARAR, shutdown, concorrência do estado de modo, captura para cadastro |
+| `Persistence/` | `SqliteInventoryRepository` contra SQLite real: criação, mudança de status, idempotência, anomalia, lote de 2000 leituras, consultas, cadastro de tags e migração de banco antigo |
 | `Readers/` | Parser `AsciiLine` (frames parciais, lixo), factory de protocolos, MockReader |
 | `Integration/` | Ponta a ponta: leitor fake → pipeline → SQLite |
 

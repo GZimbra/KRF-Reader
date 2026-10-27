@@ -24,8 +24,13 @@ namespace KrfReader.Infrastructure.Readers.Protocols;
 /// limitado antes de enviar). O multi-poll tem número finito de rodadas, então o inventário é rearmado
 /// periodicamente (<see cref="IInventoryRefreshProtocol"/>).
 /// </para>
+/// <para>
+/// Anticolisão (<see cref="IInventoryParameterProtocol"/>): Set Query (<c>0E</c>) define Session, Target e Q do
+/// multi-poll; Set Select (<c>0C</c>) + Select Mode (<c>12</c>) restringem a rodada às tags com o prefixo de EPC.
+/// Durante o multi-poll o módulo só atende a parada, por isso a troca de parâmetros é parar → configurar → iniciar.
+/// </para>
 /// </summary>
-public sealed class M100Protocol : IReaderProtocol, IInventoryRefreshProtocol
+public sealed class M100Protocol : IReaderProtocol, IInventoryRefreshProtocol, IInventoryParameterProtocol, IProtocolDiagnostics
 {
     public const string R200Name = "R200";
     public const string M100Name = "M100";
@@ -37,6 +42,7 @@ public sealed class M100Protocol : IReaderProtocol, IInventoryRefreshProtocol
     public const int MaxParamLength = 512;
 
     internal const byte TypeCommand = 0x00;
+    internal const byte TypeResponse = 0x01;
     internal const byte TypeNotice = 0x02;
     internal const byte CmdSinglePoll = 0x22;
     internal const byte CmdMultiPoll = 0x27;
@@ -45,6 +51,23 @@ public sealed class M100Protocol : IReaderProtocol, IInventoryRefreshProtocol
     internal const byte CmdSetRegion = 0x07;
     internal const byte CmdInsertChannels = 0xA9;
     internal const byte CmdSetAutoHopping = 0xAD;
+    internal const byte CmdSetSelect = 0x0C;
+    internal const byte CmdSetSelectMode = 0x12;
+    internal const byte CmdSetQuery = 0x0E;
+    internal const byte CmdError = 0xFF;
+
+    /// <summary>Código de erro do M100 para rodada de inventário sem tag (ou só colisões).</summary>
+    internal const byte ErrorInventoryFail = 0x15;
+
+    /// <summary>Select Mode: 00 = Select antes de toda operação (inclusive polling), 01 = nunca.</summary>
+    internal const byte SelectModeAlways = 0x00;
+    internal const byte SelectModeNever = 0x01;
+
+    /// <summary>SelParam: Target=100 (flag SL), Action=000 (casou → afirma SL, não casou → nega), MemBank=01 (EPC).</summary>
+    internal const byte SelParamSlEpc = 0b100_000_01;
+
+    /// <summary>EPC começa no bit 0x20 do banco EPC (depois de CRC-16 e PC).</summary>
+    internal const uint EpcBitPointer = 0x20;
 
     /// <summary>Região "US" do M100: canal n = 902,25 + 0,5·n MHz (n = 0..51).</summary>
     internal const byte RegionUs = 0x02;
@@ -90,6 +113,9 @@ public sealed class M100Protocol : IReaderProtocol, IInventoryRefreshProtocol
 
     /// <summary>Quadros descartados por checksum/terminador inválido desde a criação.</summary>
     public long InvalidFrames { get; private set; }
+
+    /// <summary>Rodadas do multi-poll sem tag lida (erro 0x15) desde a criação.</summary>
+    public long EmptyRounds { get; private set; }
 
     public IReadOnlyList<TagRead> Feed(ReadOnlySpan<byte> data, DateTime receivedAtUtc)
     {
@@ -139,6 +165,8 @@ public sealed class M100Protocol : IReaderProtocol, IInventoryRefreshProtocol
 
             if (TryParseTagNotice(frame, receivedUtc, out var read))
                 (reads ??= []).Add(read);
+            else if (IsInventoryFail(frame))
+                EmptyRounds++;
             pos = start + frameLength;
         }
 
@@ -171,6 +199,74 @@ public sealed class M100Protocol : IReaderProtocol, IInventoryRefreshProtocol
     public byte[] BuildStopInventoryCommand() => BuildFrame(CmdStopMultiPoll, []);
 
     public void Reset() => _length = 0;
+
+    public IReadOnlyList<byte[]> BuildProfileCommands(InventoryProfile profile)
+    {
+        ArgumentNullException.ThrowIfNull(profile);
+        var mask = ParseSelectMask(profile.SelectEpcPrefix);
+        var parameters = profile.Parameters with { UseSelect = mask.Length > 0 };
+        if (mask.Length == 0)
+            return [BuildFrame(CmdSetSelectMode, [SelectModeNever]), BuildSetQuery(parameters)];
+
+        return
+        [
+            BuildSetSelect(mask),
+            BuildFrame(CmdSetSelectMode, [SelectModeAlways]),
+            BuildSetQuery(parameters),
+        ];
+    }
+
+    public IReadOnlyList<byte[]> BuildApplyCommands(InventoryParameters parameters, bool inventoryRunning) =>
+        inventoryRunning
+            ? [BuildStopInventoryCommand(), BuildSetQuery(parameters), BuildStartInventoryCommand()]
+            : [BuildSetQuery(parameters)];
+
+    /// <summary>
+    /// Set Query, 2 bytes big-endian: DR(1) M(2) TRext(1) Sel(2) Session(2) Target(1) Q(4) reservado(3).
+    /// DR=8, M=1 (FM0) e TRext=1 (pilot tone) como no padrão do módulo; Sel=00 (todas) ou 11 (só SL).
+    /// </summary>
+    internal byte[] BuildSetQuery(InventoryParameters parameters)
+    {
+        var q = Math.Clamp(parameters.Q, InventoryParameters.MinQ, InventoryParameters.MaxQ);
+        var sel = parameters.UseSelect ? 0b11 : 0b00;
+        var word = (1 << 12)
+                   | (sel << 10)
+                   | (((int)parameters.Session & 0b11) << 8)
+                   | (((int)parameters.Target & 0b1) << 7)
+                   | (q << 3);
+        return BuildFrame(CmdSetQuery, [(byte)(word >> 8), (byte)word]);
+    }
+
+    /// <summary>Set Select: SelParam | Ptr(4, em bits) | MaskLen(bits) | Truncate | Mask.</summary>
+    internal byte[] BuildSetSelect(ReadOnlySpan<byte> mask)
+    {
+        var parameters = new byte[7 + mask.Length];
+        parameters[0] = SelParamSlEpc;
+        parameters[1] = (byte)(EpcBitPointer >> 24);
+        parameters[2] = (byte)(EpcBitPointer >> 16);
+        parameters[3] = (byte)(EpcBitPointer >> 8);
+        parameters[4] = (byte)EpcBitPointer;
+        parameters[5] = (byte)(mask.Length * 8);
+        parameters[6] = 0x00;
+        mask.CopyTo(parameters.AsSpan(7));
+        return BuildFrame(CmdSetSelect, parameters);
+    }
+
+    /// <summary>Prefixo hex → bytes da máscara. Exige bytes inteiros (número par de dígitos) e no máximo 31 bytes (MaskLen ≤ 255 bits).</summary>
+    public static byte[] ParseSelectMask(string? prefix)
+    {
+        var hex = Epc.Normalize(prefix);
+        if (string.IsNullOrWhiteSpace(prefix))
+            return [];
+        if (hex is null || hex.Length % 2 != 0 || hex.Length > 62)
+            throw new ArgumentException(
+                $"Prefixo de Select inválido: \"{prefix}\". Use hexadecimal com número par de dígitos (bytes inteiros), até 62 dígitos.",
+                nameof(prefix));
+        return Convert.FromHexString(hex);
+    }
+
+    private static bool IsInventoryFail(ReadOnlySpan<byte> frame) =>
+        frame[1] == TypeResponse && frame[2] == CmdError && frame.Length > FrameOverhead && frame[5] == ErrorInventoryFail;
 
     internal byte[] BuildFrame(byte command, ReadOnlySpan<byte> parameters)
     {

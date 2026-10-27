@@ -71,6 +71,38 @@
       <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
       <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
+    <!-- Veredito da passagem -->
+    <Style Selector="Border.verdict">
+      <Setter Property="Background" Value="{StaticResource PanelBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+      <Setter Property="BorderThickness" Value="1,1,1,3" />
+      <Setter Property="Padding" Value="14,8" />
+    </Style>
+    <Style Selector="Border.verdict.ok">
+      <Setter Property="BorderBrush" Value="{StaticResource EntradaTextBrush}" />
+    </Style>
+    <Style Selector="Border.verdict.warn">
+      <Setter Property="BorderBrush" Value="{StaticResource BrandOrangeBrush}" />
+    </Style>
+    <Style Selector="Border.verdict.bad">
+      <Setter Property="BorderBrush" Value="{StaticResource SaidaTextBrush}" />
+    </Style>
+    <Style Selector="TextBlock.verdictText">
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+      <Setter Property="FontSize" Value="24" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="LetterSpacing" Value="3" />
+      <Setter Property="Foreground" Value="{StaticResource BrandSandBrush}" />
+    </Style>
+    <Style Selector="Border.verdict.ok TextBlock.verdictText">
+      <Setter Property="Foreground" Value="{StaticResource EntradaTextBrush}" />
+    </Style>
+    <Style Selector="Border.verdict.warn TextBlock.verdictText">
+      <Setter Property="Foreground" Value="{StaticResource BrandOrangeBrush}" />
+    </Style>
+    <Style Selector="Border.verdict.bad TextBlock.verdictText">
+      <Setter Property="Foreground" Value="{StaticResource SaidaTextBrush}" />
+    </Style>
     <Style Selector="TextBlock.hint">
       <Setter Property="FontSize" Value="12" />
       <Setter Property="Foreground" Value="{StaticResource DimTextBrush}" />
@@ -269,48 +301,130 @@
           <TextBlock Grid.Row="3" Classes="mono dim" FontSize="11" Margin="2,0"
                      Text="{Binding TechStatsText}" TextWrapping="Wrap" />
 
-          <!-- Lista ao vivo -->
-          <Border Grid.Row="4" Classes="card" Padding="0">
-            <Grid RowDefinitions="Auto,Auto,*">
-              <DockPanel Grid.Row="0" Margin="14,8">
-                <Button DockPanel.Dock="Right" Classes="ghost" Content="LIMPAR" Command="{Binding ClearLiveReadsCommand}" />
-                <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="12">
-                  <TextBlock Classes="sectionTitle" VerticalAlignment="Center" Text="LEITURAS AO VIVO" />
-                  <TextBlock Classes="label" VerticalAlignment="Center" Text="ÚLTIMAS 200 · RECENTE NO TOPO" />
-                </StackPanel>
-              </DockPanel>
-              <Border Grid.Row="1" Classes="tableHeader">
-                <Grid ColumnDefinitions="110,*,60,150,90,180">
-                  <TextBlock Grid.Column="0" Classes="header" Text="HORA" />
-                  <TextBlock Grid.Column="1" Classes="header" Text="EPC" />
-                  <TextBlock Grid.Column="2" Classes="header" Text="ANT" />
-                  <TextBlock Grid.Column="3" Classes="header" Text="RSSI dBm" />
-                  <TextBlock Grid.Column="4" Classes="header" Text="MODO" />
-                  <TextBlock Grid.Column="5" Classes="header" Text="RESULTADO" />
+          <!-- Passagem (alta densidade) + lista ao vivo -->
+          <Grid Grid.Row="4" ColumnDefinitions="3*,2*" ColumnSpacing="10">
+            <c:HudBorder Grid.Column="0" Classes="card" Padding="0"
+                         Classes.entrada="{Binding IsEntradaActive}" Classes.saida="{Binding IsSaidaActive}">
+              <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*">
+                <DockPanel Grid.Row="0" Margin="14,8,14,4">
+                  <TextBlock DockPanel.Dock="Right" Classes="label" VerticalAlignment="Center" Text="{Binding PassageStateText}" />
+                  <TextBlock Classes="sectionTitle" VerticalAlignment="Center" Text="{Binding PassageTitle}" />
+                </DockPanel>
+
+                <!-- Veredito + métricas -->
+                <Grid Grid.Row="1" ColumnDefinitions="Auto,*,*,*,*" ColumnSpacing="10" Margin="14,2,14,6">
+                  <Border Grid.Column="0" Classes="verdict" MinWidth="220"
+                          Classes.ok="{Binding IsVerdictOk}" Classes.warn="{Binding IsVerdictWarn}" Classes.bad="{Binding IsVerdictBad}">
+                    <StackPanel Spacing="2">
+                      <TextBlock Classes="label" Text="VEREDITO" />
+                      <TextBlock Classes="verdictText" Text="{Binding VerdictText}" />
+                    </StackPanel>
+                  </Border>
+                  <Border Grid.Column="1" Classes="kpi" ToolTip.Tip="EPCs distintos lidos nesta passagem">
+                    <StackPanel>
+                      <TextBlock Classes="label" Text="TAGS" />
+                      <TextBlock Classes="readout" Text="{Binding PassageTagCount, StringFormat={}{0:N0}}" />
+                    </StackPanel>
+                  </Border>
+                  <Border Grid.Column="2" Classes="kpi"
+                          ToolTip.Tip="Rodadas seguidas, com leitura, sem nenhum EPC novo. A passagem só é confiável quando atinge o mínimo.">
+                    <StackPanel>
+                      <TextBlock Classes="label" Text="ESTÁVEIS" />
+                      <TextBlock Classes="readout" Text="{Binding PassageStableText}" />
+                    </StackPanel>
+                  </Border>
+                  <Border Grid.Column="3" Classes="kpi"
+                          ToolTip.Tip="Tags provavelmente não lidas (estimador Chao2: tags vistas em 1 e em 2 rodadas)">
+                    <StackPanel>
+                      <TextBlock Classes="label" Text="NÃO LIDAS EST." />
+                      <TextBlock Classes="readout" Foreground="{StaticResource BrandSandBrush}" Text="{Binding PassageMissedText}" />
+                    </StackPanel>
+                  </Border>
+                  <Border Grid.Column="4" Classes="kpi" ToolTip.Tip="Leituras aceitas (com releituras) nesta passagem">
+                    <StackPanel>
+                      <TextBlock Classes="label" Text="LEITURAS" />
+                      <TextBlock Classes="readout" Text="{Binding PassageReads, StringFormat={}{0:N0}}" />
+                    </StackPanel>
+                  </Border>
                 </Grid>
-              </Border>
-              <ListBox Grid.Row="2" Classes="compact" ItemsSource="{Binding LiveReads}">
-                <ListBox.ItemTemplate>
-                  <DataTemplate x:DataType="vm:LiveReadItem">
-                    <Border Classes="row" Classes.anomaly="{Binding IsAnomaly}">
-                      <Grid ColumnDefinitions="110,*,60,150,90,180">
-                        <TextBlock Grid.Column="0" Classes="dim" Text="{Binding Time}" />
-                        <TextBlock Grid.Column="1" Text="{Binding Epc}" />
-                        <TextBlock Grid.Column="2" Text="{Binding Antenna}" />
-                        <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="8">
-                          <TextBlock Width="44" Text="{Binding Rssi}" />
-                          <c:SignalMeter Width="80" Height="8" VerticalAlignment="Center" ShowScale="False"
-                                         Segments="12" Value="{Binding RssiValue}" />
-                        </StackPanel>
-                        <TextBlock Grid.Column="4" Text="{Binding Mode}" />
-                        <TextBlock Grid.Column="5" Text="{Binding Result}" />
-                      </Grid>
-                    </Border>
-                  </DataTemplate>
-                </ListBox.ItemTemplate>
-              </ListBox>
-            </Grid>
-          </Border>
+
+                <StackPanel Grid.Row="2" Margin="14,0,14,4" Spacing="2">
+                  <TextBlock Classes="hint" Text="{Binding VerdictHint}" />
+                  <TextBlock Classes="mono dim" FontSize="11" Text="{Binding PassageDetailText}" TextWrapping="Wrap" />
+                  <TextBlock Classes="mono" FontSize="11" Foreground="{StaticResource BrandOrangeBrush}"
+                             Text="{Binding InventoryControlText}" TextWrapping="Wrap" />
+                  <TextBlock Classes="error" FontSize="12" Text="{Binding PassageIssuesText}" TextWrapping="Wrap"
+                             IsVisible="{Binding PassageIssuesText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}" />
+                </StackPanel>
+
+                <Border Grid.Row="3" Classes="tableHeader">
+                  <Grid ColumnDefinitions="*,60,70,150,100">
+                    <TextBlock Grid.Column="0" Classes="header" Text="EPC" />
+                    <TextBlock Grid.Column="1" Classes="header" Text="LEIT." />
+                    <TextBlock Grid.Column="2" Classes="header" Text="RODADAS" />
+                    <TextBlock Grid.Column="3" Classes="header" Text="RSSI MÁX dBm" />
+                    <TextBlock Grid.Column="4" Classes="header" Text="SINAL" />
+                  </Grid>
+                </Border>
+                <TextBlock Grid.Row="4" Classes="hint" Margin="14,10" IsVisible="{Binding !HasPassage}"
+                           Text="Nenhuma passagem ainda. Tags marginais (uma rodada só ou RSSI no limite) aparecem no topo." />
+                <ListBox Grid.Row="5" Classes="compact" ItemsSource="{Binding PassageTags}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:PassageTagRow">
+                      <Border Classes="row" Classes.anomaly="{Binding IsMarginal}">
+                        <Grid ColumnDefinitions="*,60,70,150,100">
+                          <TextBlock Grid.Column="0" Text="{Binding Epc}" />
+                          <TextBlock Grid.Column="1" Text="{Binding Reads}" />
+                          <TextBlock Grid.Column="2" Text="{Binding Rounds}" />
+                          <StackPanel Grid.Column="3" Orientation="Horizontal" Spacing="8">
+                            <TextBlock Width="44" Text="{Binding MaxRssi}" />
+                            <c:SignalMeter Width="80" Height="8" VerticalAlignment="Center" ShowScale="False"
+                                           Segments="12" Value="{Binding MaxRssiValue}" />
+                          </StackPanel>
+                          <TextBlock Grid.Column="4" Text="{Binding Flag}" />
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </Grid>
+            </c:HudBorder>
+
+            <!-- Lista ao vivo -->
+            <Border Grid.Column="1" Classes="card" Padding="0">
+              <Grid RowDefinitions="Auto,Auto,*">
+                <DockPanel Grid.Row="0" Margin="14,8">
+                  <Button DockPanel.Dock="Right" Classes="ghost" Content="LIMPAR" Command="{Binding ClearLiveReadsCommand}" />
+                  <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="12">
+                    <TextBlock Classes="sectionTitle" VerticalAlignment="Center" Text="GRAVADAS NO ESTOQUE" />
+                    <TextBlock Classes="label" VerticalAlignment="Center" Text="ÚLTIMAS 200" />
+                  </StackPanel>
+                </DockPanel>
+                <Border Grid.Row="1" Classes="tableHeader">
+                  <Grid ColumnDefinitions="100,*,52,130">
+                    <TextBlock Grid.Column="0" Classes="header" Text="HORA" />
+                    <TextBlock Grid.Column="1" Classes="header" Text="EPC" />
+                    <TextBlock Grid.Column="2" Classes="header" Text="RSSI" />
+                    <TextBlock Grid.Column="3" Classes="header" Text="RESULTADO" />
+                  </Grid>
+                </Border>
+                <ListBox Grid.Row="2" Classes="compact" ItemsSource="{Binding LiveReads}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:LiveReadItem">
+                      <Border Classes="row" Classes.anomaly="{Binding IsAnomaly}">
+                        <Grid ColumnDefinitions="100,*,52,130">
+                          <TextBlock Grid.Column="0" Classes="dim" Text="{Binding Time}" />
+                          <TextBlock Grid.Column="1" Text="{Binding Epc}" TextTrimming="CharacterEllipsis" />
+                          <TextBlock Grid.Column="2" Text="{Binding Rssi}" />
+                          <TextBlock Grid.Column="3" Text="{Binding Result}" />
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </Grid>
+            </Border>
+          </Grid>
         </Grid>
       </TabItem>
 
@@ -654,6 +768,53 @@
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
                       <TextBox Width="160" Classes="mono" Text="{Binding FilterAntennasText}" Watermark="vazio = todas" />
                       <TextBlock Classes="hint" Text="{Binding FilterMessage}" />
+                    </StackPanel>
+                  </Grid>
+                </StackPanel>
+              </c:HudBorder>
+
+              <!-- Anticolisão Gen2 -->
+              <c:HudBorder Classes="card" Padding="20,16">
+                <StackPanel Spacing="10">
+                  <DockPanel>
+                    <TextBlock DockPanel.Dock="Right" Classes="label" VerticalAlignment="Center" Text="VALE AO APLICAR O LEITOR" />
+                    <TextBlock Classes="sectionTitle" Text="ANTICOLISÃO · MUITAS TAGS" />
+                  </DockPanel>
+                  <TextBlock Classes="hint"
+                             Text="Parâmetros Gen2 do inventário (R200/M100). Padrão para carga de dezenas de tags: S2, alternância A↔B, Q dinâmico. Q fixo só se souber o tamanho da população." />
+
+                  <Grid ColumnDefinitions="150,*" Margin="0,4,0,0">
+                    <TextBlock Classes="field" Text="SESSION" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                      <ComboBox Width="100" ItemsSource="{Binding SessionOptions}" SelectedIndex="{Binding InventorySessionIndex}" />
+                      <TextBlock Classes="hint" Text="S2/S3: tag lida fica quieta e libera slot para as outras" />
+                    </StackPanel>
+                  </Grid>
+                  <Grid ColumnDefinitions="150,*">
+                    <TextBlock Classes="field" Text="TARGET" />
+                    <ComboBox Grid.Column="1" Width="200" ItemsSource="{Binding TargetOptions}" SelectedIndex="{Binding InventoryTargetIndex}" />
+                  </Grid>
+                  <Grid ColumnDefinitions="150,*">
+                    <TextBlock Classes="field" Text="RODADA" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                      <NumericUpDown Width="140" Minimum="100" Maximum="5000" Increment="100" FormatString="0"
+                                     Value="{Binding InventoryDwellMs}" />
+                      <TextBlock Classes="hint" Text="ms por rodada (troca de target e recálculo de Q)" />
+                    </StackPanel>
+                  </Grid>
+                  <Grid ColumnDefinitions="150,*">
+                    <TextBlock Classes="field" Text="Q INICIAL" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                      <NumericUpDown Width="140" Minimum="0" Maximum="15" Increment="1" FormatString="0"
+                                     Value="{Binding InventoryInitialQ}" />
+                      <CheckBox Content="Q dinâmico (2^Q ≈ tags no campo)" IsChecked="{Binding InventoryAdaptiveQ}" />
+                    </StackPanel>
+                  </Grid>
+                  <Grid ColumnDefinitions="150,*">
+                    <TextBlock Classes="field" Text="SELECT EPC" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                      <TextBox Width="200" Classes="mono" Text="{Binding SelectEpcPrefix}" Watermark="prefixo hex · vazio = todas" />
+                      <TextBlock Classes="hint" Text="Só tags com este prefixo respondem em RF" />
                     </StackPanel>
                   </Grid>
                 </StackPanel>

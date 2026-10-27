@@ -26,7 +26,8 @@ public partial class App : Avalonia.Application
                 _root.CreatePipeline,
                 options => ReaderSettingsStore.SaveAsync(options),
                 _root.ReaderOptions,
-                _root.PipelineOptions);
+                _root.PipelineOptions,
+                _root.PassageOptions);
 
             desktop.MainWindow = new MainWindow { DataContext = viewModel };
             desktop.Exit += (_, _) => _root?.Dispose();

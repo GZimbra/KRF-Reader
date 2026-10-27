@@ -95,6 +95,8 @@ public sealed class InventoryPipeline : IInventoryPipeline
 
     public event EventHandler<OperationMode?>? ModeChanged;
 
+    public event EventHandler<AcceptedRead>? ReadAccepted;
+
     public event EventHandler<string>? Error;
 
     public async Task StartAsync(CancellationToken cancellationToken = default)
@@ -325,6 +327,9 @@ public sealed class InventoryPipeline : IInventoryPipeline
             }
 
             var read = epc == e.Read.Epc ? e.Read : e.Read with { Epc = epc };
+            if (ReadAccepted is { } accepted && _filter.Accept(read))
+                Raise(accepted, new AcceptedRead(read, mode.Value));
+
             if (!rt.Input.Writer.TryWrite(PipelineMessage.ForRead(new StampedRead(read, mode.Value, generation))))
                 Interlocked.Increment(ref _queueDropped);
         }

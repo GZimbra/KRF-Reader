@@ -20,8 +20,10 @@ public sealed class CompositionRoot : IDisposable
         IConfiguration configuration,
         ReaderOptions readerOptions,
         PipelineOptions pipelineOptions,
+        PassageOptions passageOptions,
         DatabaseOptions databaseOptions)
     {
+        PassageOptions = passageOptions;
         Configuration = configuration;
         ReaderOptions = readerOptions;
         PipelineOptions = pipelineOptions;
@@ -50,6 +52,7 @@ public sealed class CompositionRoot : IDisposable
     public IConfiguration Configuration { get; }
     public ReaderOptions ReaderOptions { get; }
     public PipelineOptions PipelineOptions { get; }
+    public PassageOptions PassageOptions { get; }
     public DatabaseOptions DatabaseOptions { get; }
     public ILoggerFactory LoggerFactory { get; }
     public IInventoryRepository Repository { get; }
@@ -91,6 +94,8 @@ public sealed class CompositionRoot : IDisposable
         configuration.GetSection(ReaderOptions.SectionName).Bind(reader);
         var pipeline = new PipelineOptions();
         configuration.GetSection(PipelineOptions.SectionName).Bind(pipeline);
+        var passage = new PassageOptions();
+        configuration.GetSection(PassageOptions.SectionName).Bind(passage);
         var database = new DatabaseOptions();
         configuration.GetSection(DatabaseOptions.SectionName).Bind(database);
 
@@ -99,7 +104,7 @@ public sealed class CompositionRoot : IDisposable
         reader.Antennas = ReadArray(configuration, $"{ReaderOptions.SectionName}:{nameof(ReaderOptions.Antennas)}") ?? reader.Antennas;
         pipeline.AllowedAntennas = ReadArray(configuration, $"{PipelineOptions.SectionName}:{nameof(PipelineOptions.AllowedAntennas)}") ?? pipeline.AllowedAntennas;
 
-        return new CompositionRoot(configuration, reader, pipeline, database);
+        return new CompositionRoot(configuration, reader, pipeline, passage, database);
     }
 
     private static int[]? ReadArray(IConfiguration configuration, string key)
@@ -110,7 +115,9 @@ public sealed class CompositionRoot : IDisposable
         return section.Get<int[]>() ?? [];
     }
 
-    /// <summary>Cria leitor + pipeline (ainda não iniciados). Chamado de novo a cada troca de leitor em runtime.</summary>
+    /// <summary>
+    /// Cria leitor + pipeline + monitor de passagem (ainda não iniciados). Chamado de novo a cada troca de leitor em runtime.
+    /// </summary>
     public PipelineHandle CreatePipeline(ReaderOptions readerOptions)
     {
         var reader = _readerFactory.Create(readerOptions);
@@ -119,7 +126,14 @@ public sealed class CompositionRoot : IDisposable
             Repository,
             PipelineOptions,
             LoggerFactory.CreateLogger<InventoryPipeline>());
-        return new PipelineHandle(pipeline, reader);
+        var monitor = new PassageMonitor(
+            pipeline,
+            reader,
+            readerOptions.Inventory ?? new InventoryOptions(),
+            PassageOptions,
+            PipelineOptions.MinRssi,
+            LoggerFactory.CreateLogger<PassageMonitor>());
+        return new PipelineHandle(pipeline, reader, monitor);
     }
 
     public void Dispose() => LoggerFactory.Dispose();

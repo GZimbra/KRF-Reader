@@ -16,8 +16,13 @@ namespace KrfReader.Infrastructure.Readers;
 /// <see cref="DisconnectAsync"/>. Durante a queda <see cref="IsConnected"/> é false, mas a sessão continua:
 /// Start/Stop chamados nesse intervalo valem para quando o link voltar.
 /// </para>
+/// <para>
+/// Com protocolo <see cref="IInventoryParameterProtocol"/>, o perfil de anticolisão (<see cref="ReaderOptions.Inventory"/>)
+/// é enviado na conexão e os parâmetros ajustados em tempo real (<see cref="IInventoryTuning"/>) são reaplicados em
+/// toda reconexão.
+/// </para>
 /// </summary>
-public abstract class StreamRfidReaderBase : IRfidReader
+public abstract class StreamRfidReaderBase : IRfidReader, IInventoryTuning, IReaderDiagnosticsSource
 {
     private const int ReadBufferSize = 4096;
 
@@ -28,6 +33,7 @@ public abstract class StreamRfidReaderBase : IRfidReader
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly SemaphoreSlim _io = new(1, 1);
     private readonly object _emitLock = new();
+    private readonly object _parametersLock = new();
 
     private Stream? _stream;
     private CancellationTokenSource? _sessionCts;
@@ -36,6 +42,8 @@ public abstract class StreamRfidReaderBase : IRfidReader
     private volatile bool _session;
     private volatile bool _linkUp;
     private volatile bool _running;
+    private InventoryParameters _parameters;
+    private long _linkDrops;
 
     protected StreamRfidReaderBase(ReaderOptions options, IReaderProtocol protocol, ILogger? logger = null, TimeProvider? timeProvider = null)
     {
@@ -45,6 +53,68 @@ public abstract class StreamRfidReaderBase : IRfidReader
         _protocol = protocol;
         Logger = logger;
         _time = timeProvider ?? TimeProvider.System;
+
+        var inventory = options.Inventory ?? new InventoryOptions();
+        _parameters = new InventoryParameters(
+            inventory.Session,
+            InventoryTarget.A,
+            Math.Clamp(inventory.InitialQ, InventoryParameters.MinQ, InventoryParameters.MaxQ),
+            UseSelect: !string.IsNullOrWhiteSpace(inventory.SelectEpcPrefix));
+    }
+
+    public bool IsTuningSupported => _protocol is IInventoryParameterProtocol;
+
+    public InventoryParameters CurrentParameters
+    {
+        get
+        {
+            lock (_parametersLock)
+                return _parameters;
+        }
+    }
+
+    private TimeSpan CommandGap => TimeSpan.FromMilliseconds(Math.Max(0, Options.Inventory?.CommandGapMs ?? 0));
+
+    public ReaderDiagnostics GetDiagnostics() => _protocol is IProtocolDiagnostics d
+        ? new ReaderDiagnostics(d.InvalidFrames, d.EmptyRounds, Interlocked.Read(ref _linkDrops))
+        : new ReaderDiagnostics(0, 0, Interlocked.Read(ref _linkDrops));
+
+    public async Task ApplyInventoryParametersAsync(InventoryParameters parameters, CancellationToken cancellationToken = default)
+    {
+        if (_protocol is not IInventoryParameterProtocol tuning)
+            return;
+
+        // Sob _gate: não pode intercalar com Stop (a sequência parar → configurar → iniciar religaria o inventário).
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            parameters = parameters with { UseSelect = CurrentParameters.UseSelect };
+            lock (_parametersLock)
+                _parameters = parameters;
+            if (!_session)
+                return;
+
+            await _io.WaitAsync(cancellationToken).ConfigureAwait(false);
+            try
+            {
+                // Link caído: a reconexão reaplica _parameters.
+                if (!_linkUp || _stream is not { } stream)
+                    return;
+                await WriteSequenceAsync(stream, tuning.BuildApplyCommands(parameters, _running), cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                RaiseError("Falha ao aplicar parâmetros de inventário.", ex);
+            }
+            finally
+            {
+                _io.Release();
+            }
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     protected ReaderOptions Options { get; }
@@ -251,6 +321,23 @@ public abstract class StreamRfidReaderBase : IRfidReader
         var commands = _protocol.BuildConfigureCommands(Options.PowerDbm, Options.Antennas ?? []);
         foreach (var command in commands)
             await WriteCommandAsync(stream, command, cancellationToken).ConfigureAwait(false);
+
+        if (_protocol is IInventoryParameterProtocol tuning)
+        {
+            var profile = new InventoryProfile(CurrentParameters, Options.Inventory?.SelectEpcPrefix ?? "");
+            await WriteSequenceAsync(stream, tuning.BuildProfileCommands(profile), cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    private async Task WriteSequenceAsync(Stream stream, IReadOnlyList<byte[]> commands, CancellationToken cancellationToken)
+    {
+        var gap = CommandGap;
+        for (var i = 0; i < commands.Count; i++)
+        {
+            if (i > 0 && gap > TimeSpan.Zero)
+                await Task.Delay(gap, _time, cancellationToken).ConfigureAwait(false);
+            await WriteCommandAsync(stream, commands[i], cancellationToken).ConfigureAwait(false);
+        }
     }
 
     private static async Task WriteCommandAsync(Stream stream, byte[] command, CancellationToken cancellationToken)
@@ -282,6 +369,7 @@ public abstract class StreamRfidReaderBase : IRfidReader
             catch (Exception ex)
             {
                 _linkUp = false;
+                Interlocked.Increment(ref _linkDrops);
                 RaiseError("Conexão com o leitor perdida; tentando reconectar.", ex);
                 await CloseQuietlyAsync(stream).ConfigureAwait(false);
 

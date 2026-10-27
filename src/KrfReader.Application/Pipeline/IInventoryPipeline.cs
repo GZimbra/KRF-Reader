@@ -54,6 +54,12 @@ public interface IInventoryPipeline : IAsyncDisposable
     /// <summary>Disparado após cada lote persistido com sucesso.</summary>
     event EventHandler<BatchResult>? BatchPersisted;
 
+    /// <summary>
+    /// Leitura aceita com modo ativo (EPC normalizado, passou no filtro de RSSI/antena), ANTES da deduplicação:
+    /// todas as releituras chegam aqui. Disparado na thread do leitor: handler deve ser rápido.
+    /// </summary>
+    event EventHandler<AcceptedRead>? ReadAccepted;
+
     /// <summary>Mudança de modo (inclusive para null).</summary>
     event EventHandler<OperationMode?>? ModeChanged;
 
@@ -76,6 +82,13 @@ public sealed record PipelineStats(
     long QueueDropped,
     long Persisted,
     int DistinctEpcsSession);
+
+/// <summary>Leitura aceita pelo filtro, com o modo vigente no recebimento.</summary>
+public sealed class AcceptedRead(TagRead read, OperationMode mode) : EventArgs
+{
+    public TagRead Read { get; } = read;
+    public OperationMode Mode { get; } = mode;
+}
 
 /// <summary>Tag vista durante <see cref="IInventoryPipeline.CaptureAsync"/>.</summary>
 /// <param name="AntennaId">Antena da leitura de maior RSSI.</param>

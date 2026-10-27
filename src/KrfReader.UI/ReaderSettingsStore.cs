@@ -30,6 +30,7 @@ public static class ReaderSettingsStore
             root = [];
         }
 
+        var inventory = options.Inventory ?? new InventoryOptions();
         root[ReaderOptions.SectionName] = new JsonObject
         {
             [nameof(ReaderOptions.Model)] = options.Model,
@@ -52,6 +53,18 @@ public static class ReaderSettingsStore
             [nameof(ReaderOptions.PowerDbm)] = options.PowerDbm,
             [nameof(ReaderOptions.Antennas)] = new JsonArray(options.Antennas.Select(a => (JsonNode)a).ToArray()),
             [nameof(ReaderOptions.ReconnectDelayMs)] = options.ReconnectDelayMs,
+            [nameof(ReaderOptions.Inventory)] = new JsonObject
+            {
+                [nameof(InventoryOptions.Session)] = inventory.Session.ToString(),
+                [nameof(InventoryOptions.Target)] = inventory.Target.ToString(),
+                [nameof(InventoryOptions.TargetDwellMs)] = inventory.TargetDwellMs,
+                [nameof(InventoryOptions.InitialQ)] = inventory.InitialQ,
+                [nameof(InventoryOptions.AdaptiveQ)] = inventory.AdaptiveQ,
+                [nameof(InventoryOptions.MinQ)] = inventory.MinQ,
+                [nameof(InventoryOptions.MaxQ)] = inventory.MaxQ,
+                [nameof(InventoryOptions.SelectEpcPrefix)] = inventory.SelectEpcPrefix,
+                [nameof(InventoryOptions.CommandGapMs)] = inventory.CommandGapMs,
+            },
         };
 
         var tmp = path + ".tmp";

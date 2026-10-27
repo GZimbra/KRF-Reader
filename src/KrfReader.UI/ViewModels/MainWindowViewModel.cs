@@ -57,7 +57,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Func<ReaderOptions, PipelineHandle> pipelineFactory,
         Func<ReaderOptions, Task> saveReaderOptions,
         ReaderOptions readerOptions,
-        PipelineOptions pipelineOptions)
+        PipelineOptions pipelineOptions,
+        PassageOptions passageOptions)
     {
         _repository = repository;
         _pipelineFactory = pipelineFactory;
@@ -84,6 +85,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _minRssi = Math.Clamp(pipelineOptions.MinRssi, -100, -20);
         _filterAntennasText = string.Join(",", pipelineOptions.AllowedAntennas);
         _filterMessage = DescribeFilter(pipelineOptions.AllowedAntennas);
+        InitializeInventoryFields(readerOptions, passageOptions);
 
         _uiTimer = new DispatcherTimer(DispatcherPriority.Background) { Interval = TimeSpan.FromMilliseconds(250) };
         _uiTimer.Tick += OnUiTick;
@@ -512,6 +514,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         try
         {
             _current?.Pipeline.UpdateFilter(MinRssi, antennas);
+            _current?.Monitor.SetMinRssi(MinRssi);
             FilterMessage = DescribeFilter(antennas);
         }
         catch (Exception ex)
@@ -590,6 +593,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return false;
         }
 
+        if (!TryBuildInventoryOptions(out var inventory, out error))
+            return false;
+
         options = new ReaderOptions
         {
             Model = SelectedReaderModel.Id,
@@ -600,6 +606,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             PowerDbm = (double)power,
             Antennas = antennas,
             ReconnectDelayMs = _baseReaderOptions.ReconnectDelayMs,
+            Inventory = inventory,
         };
         error = "";
         return true;
@@ -703,6 +710,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         try
         {
             await Task.Run(() => handle.Pipeline.StartAsync());
+            handle.Monitor.SetMinRssi(MinRssi);
+            handle.Monitor.Start();
             IsPipelineRunning = true;
             ActiveMode = handle.Pipeline.CurrentMode;
             StatusMessage = "Leitor pronto. Selecione ENTRADA ou SAÍDA.";
@@ -737,6 +746,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
 
         Detach(handle);
+        try { await Task.Run(async () => await handle.Monitor.DisposeAsync()); }
+        catch (Exception ex) { ReportError($"Erro ao liberar o monitor de passagem: {ex.Message}"); }
         try { await Task.Run(async () => await handle.Pipeline.DisposeAsync()); }
         catch (Exception ex) { ReportError($"Erro ao liberar o pipeline: {ex.Message}"); }
         try { await Task.Run(async () => await handle.Reader.DisposeAsync()); }
@@ -744,6 +755,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         _current = null;
         ResetSignal();
+        ResetPassage();
         ActiveMode = null;
         IsConnected = false;
         ConnectionText = "Desconectado";
@@ -798,6 +810,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         handle.Pipeline.ModeChanged += OnModeChanged;
         handle.Pipeline.Error += OnPipelineError;
         handle.Reader.TagRead += OnReaderTagRead;
+        AttachPassage(handle.Monitor);
     }
 
     private void Detach(PipelineHandle handle)
@@ -806,6 +819,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         handle.Pipeline.ModeChanged -= OnModeChanged;
         handle.Pipeline.Error -= OnPipelineError;
         handle.Reader.TagRead -= OnReaderTagRead;
+        DetachPassage(handle.Monitor);
     }
 
     private void OnBatchPersisted(object? sender, BatchResult batch)
@@ -852,6 +866,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                     $"Brutas {s.RawReads:N0} · filtradas {s.FilteredOut:N0} · duplicadas {s.Duplicates:N0} · " +
                     $"descartadas {s.StaleDiscarded:N0} · persistidas {s.Persisted:N0} · drops de fila {s.QueueDropped:N0}";
 
+                UpdateInventoryControl(handle.Monitor);
                 var connected = handle.Reader.IsConnected;
                 UpdateSignal(connected && handle.Reader.IsInventoryRunning);
                 IsConnected = connected;

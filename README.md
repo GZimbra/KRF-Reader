@@ -11,14 +11,14 @@
     <img src="https://img.shields.io/badge/Banco-SQLite%20%2B%20Dapper-003B57?style=flat-square&amp;logo=sqlite&amp;logoColor=white" alt="SQLite com Dapper" />
     <img src="https://img.shields.io/badge/Leitor-R200%20%7C%20Serial%20%7C%20TCP-191919?style=flat-square" alt="Leitor R200, Serial ou TCP" />
     <img src="https://img.shields.io/badge/Plataformas-Windows%20%7C%20Linux%20%7C%20macOS-555555?style=flat-square" alt="Windows, Linux e macOS" />
-    <img src="https://img.shields.io/badge/Testes-199%20casos%20xUnit-2E7D32?style=flat-square" alt="199 casos de teste xUnit" />
+    <img src="https://img.shields.io/badge/Testes-238%20casos%20xUnit-2E7D32?style=flat-square" alt="238 casos de teste xUnit" />
   </p>
 </div>
 
 > [!WARNING]
 > O app não tem modo simulado: ele sobe conectando no leitor **R200** (COM3, 115200, 915–928 MHz). Com o R200 real
 > foram validados identificação, potência, região/canais, início e parada do inventário. **A leitura de tags com
-> hardware real nunca foi validada**: o leitor foi testado sem antena. O pipeline foi coberto por 199 testes
+> hardware real nunca foi validada**: o leitor foi testado sem antena. O pipeline foi coberto por 238 testes
 > automatizados, que usam um simulador que só existe no projeto de testes.
 > UHF lê fora da zona de interesse; o software mitiga leituras fantasma, mas não resolve. Leia
 > [Limitações físicas do UHF](#limitações-físicas-do-uhf) antes de instalar.
@@ -33,6 +33,7 @@
   - [Regras de negócio](#regras-de-negócio)
   - [Cadastro de tags](#cadastro-de-tags)
   - [Pipeline de leituras](#pipeline-de-leituras)
+  - [Leitura de muitas tags (passagem)](#leitura-de-muitas-tags-passagem)
   - [Leitor real](#leitor-real)
   - [Novo driver](#novo-driver)
   - [Trocar o banco](#trocar-o-banco)
@@ -79,10 +80,10 @@ KRF-Reader/
 ├── src/
 │   ├── KrfReader.Domain/              # InventoryRules, TagRegistration, Epc, TagRead, TagState, InventoryEvent, DbLiterals
 │   ├── KrfReader.Application/
-│   │   ├── Configuration/             # ReaderOptions, PipelineOptions, DatabaseOptions
+│   │   ├── Configuration/             # ReaderOptions (+ Inventory), PipelineOptions, PassageOptions, DatabaseOptions
 │   │   ├── Persistence/               # IInventoryRepository, ITagCatalogRepository
-│   │   ├── Pipeline/                  # InventoryPipeline, Deduplicator, ReadFilter, ModeState
-│   │   └── Readers/                   # IRfidReader, IReaderProtocol, IRfidReaderFactory
+│   │   ├── Pipeline/                  # InventoryPipeline, Deduplicator, ReadFilter, ModeState, PassageTracker, PassageMonitor
+│   │   └── Readers/                   # IRfidReader, IReaderProtocol, IRfidReaderFactory, InventoryTuning (Gen2)
 │   ├── KrfReader.Infrastructure/
 │   │   ├── Persistence/               # SqliteInventoryRepository (Dapper, upsert em lote; cadastro em .Catalog.cs)
 │   │   └── Readers/                   # GenericSerialReader, GenericTcpReader, Protocols/ (R200/M100, R2000, AsciiLine)
@@ -112,7 +113,10 @@ KRF-Reader/
 
 <div align="center">
   <img src="docs/screenshots/operacao.png" width="820" alt="KRF Reader: aba Operação" />
-  <br/><sub>Operação: modo ativo, contadores, leituras ao vivo e anomalias</sub>
+  <br/><sub>Operação: passagem de 54 tags ao vivo (gerada com o simulador Gen2 do projeto de testes)</sub>
+  <br/><br/>
+  <img src="docs/screenshots/passagem.png" width="820" alt="KRF Reader: passagem fechada sem convergir" />
+  <br/><sub>Passagem fechada como NÃO CONVERGIU: tag fraca apareceu quando a carga já saía</sub>
   <br/><br/>
   <img src="docs/screenshots/consulta.png" width="820" alt="KRF Reader: aba Consulta" />
   <br/><sub>Consulta por EPC, descrição ou SKU</sub>
@@ -126,7 +130,7 @@ KRF-Reader/
 
 <br/>
 
-**OPERAÇÃO.** Botões ENTRADA, SAÍDA e PARAR. Mostra o modo ativo, o status do leitor, os contadores (tags dentro, tags fora, lidas nesta sessão) e as últimas 200 leituras aplicadas, com EPC, antena, RSSI e resultado. Saída aparece em vermelho; anomalias (saída sem entrada) ficam num painel separado.
+**OPERAÇÃO.** Botões ENTRADA, SAÍDA e PARAR. Mostra o modo ativo, o status do leitor, os contadores (tags dentro, tags fora, lidas nesta sessão), o painel **PASSAGEM** (veredito, tags, rodadas estáveis, estimativa de não lidas, tabela de tags com as marginais no topo, Q/session/target em uso) e as últimas 200 leituras gravadas no estoque. Detalhes em [Leitura de muitas tags](#leitura-de-muitas-tags-passagem).
 
 **CONSULTA.** Busca por trecho de EPC, descrição ou SKU. Mostra descrição do cadastro, status atual, última leitura e última mudança de cada tag.
 
@@ -136,6 +140,7 @@ KRF-Reader/
 
 - *Leitor RFID*: tipo (Serial, Tcp), porta serial e baud, host e porta TCP, protocolo, potência e antenas ativas. Só vale após **Aplicar leitor**, que desconecta e reconecta. Exige modo PARADO.
 - *Filtro de leituras*: RSSI mínimo e antenas aceitas. Vale na hora, sem reconectar.
+- *Anticolisão · muitas tags*: session Gen2, target (A fixo ou A↔B), duração da rodada, Q inicial, Q dinâmico e prefixo de Select. Vale ao aplicar o leitor.
 
 Fechar a janela com modo ativo grava as leituras pendentes antes de sair ("Encerrando...").
 
@@ -188,6 +193,66 @@ flowchart TD
 - **Geração de modo.** Cada troca de modo (ou PARAR) incrementa um contador de geração. Toda leitura é carimbada com o modo e a geração **no instante em que chega do leitor**. Item com geração antiga é descartado em qualquer estágio (fila, worker, buffer de lote). Por isso uma leitura antiga nunca recebe o modo novo.
 - **PARAR** usa uma *barreira de flush*: um marcador percorre fila → workers → persistência, e o lote pendente da geração atual é gravado antes de o modo virar "parado".
 - **Shutdown** (fechar a janela): para o leitor, completa os channels em cascata, drena, persiste e encerra com timeout (`ShutdownTimeoutMs`).
+
+### Leitura de muitas tags (passagem)
+
+Objetivo: uma carga com dezenas de tags (ex.: 50 num caminhão) atravessa a antena e o sistema lê todas, ou avisa que
+não leu. **Não existe garantia física de 100%**: tag sobre metal, dentro de líquido, encoberta por outra ou com a
+antena perpendicular à polarização pode não responder nunca, e nenhum software lê uma tag que não responde. O que o
+código garante é aplicar as técnicas de anticolisão que portais comerciais usam e medir, com número, se a descoberta
+convergiu.
+
+**Anticolisão Gen2 no R200** (`M100Protocol`, comandos `0E` Set Query, `0C` Set Select, `12` Select Mode):
+
+| Técnica | Como | Por quê |
+|---|---|---|
+| Session S2 | `Inventory.Session` = `S2` | Tag lida inverte o flag e fica quieta ≥ 2 s; as que ainda não responderam disputam menos slots. |
+| Alternância de target A↔B | `Inventory.Target` = `DualAB`, a cada `TargetDwellMs` | Cada meia-volta relê toda a população; tag que perdeu a rodada A tem nova chance na B. Cada meia-volta é uma *rodada* da métrica. |
+| Q dinâmico | `AdaptiveQ`, `MinQ`–`MaxQ` | Quadro ALOHA de 2^Q slots ajustado para 2^Q ≈ tags que responderam na rodada anterior (50 tags → Q 6, 64 slots). Q baixo demais = colisão; alto demais = slot vazio. |
+| Select por prefixo | `SelectEpcPrefix` (hex, bytes inteiros) | Só tags com o prefixo respondem em RF; tags estranhas no ambiente não ocupam slot. |
+| Salto de canal | 26 canais 915–928 MHz (já existia) | Desvanecimento seletivo: tag em nulo num canal responde em outro. |
+| Multi-poll contínuo | `27` com rearme a cada 30 s (já existia) | Inventário sem pausa enquanto o modo está ativo. |
+
+Trocar Q ou target exige parar o multi-poll, configurar e reiniciar (o M100 ignora comandos durante o multi-poll):
+`28 → 0E → 27`, com `CommandGapMs` entre eles. Os parâmetros vigentes são reaplicados em toda reconexão.
+
+**Sessão de passagem** (`PassageTracker` + `PassageMonitor`): a primeira leitura aceita com modo ativo abre a
+passagem; `Passage.SilenceMs` sem leitura nenhuma a fecha (a carga saiu), assim como PARAR ou troca de modo. Por EPC:
+leituras, rodadas em que apareceu, RSSI máximo e médio, primeira e última leitura. A deduplicação e a gravação no
+estoque continuam no pipeline de sempre; a passagem só observa.
+
+**Métrica de confiança e veredito:**
+
+| Veredito | Condição |
+|---|---|
+| `CONFIÁVEL` | `StableRounds` rodadas seguidas (padrão 3), com leitura, sem EPC novo; nenhuma tag vista numa rodada só; estimador ≤ `MaxEstimatedMissed`; enlace íntegro. |
+| `ATENÇÃO` | Convergiu, mas há tag vista numa única rodada, estimador acima do limite ou quadro corrompido na serial. |
+| `NÃO CONVERGIU` | A carga saiu enquanto ainda apareciam EPCs novos: provável tag não lida. Repassar. |
+| `DADOS INCOMPLETOS` | Leitura perdida fora do RF: queda do leitor, fila cheia ou erro de gravação. Repassar. |
+
+O estimador é o **Chao2** (captura e recaptura por incidência): com Q1 tags vistas numa rodada só, Q2 em duas e m
+rodadas, as não vistas são ≈ ((m−1)/m)·Q1(Q1−1)/(2(Q2+1)). Tag marginal (uma rodada só ou RSSI até
+`MarginalRssiMarginDb` acima do mínimo do filtro) aparece no topo da tabela.
+
+**Validação no simulador** (`tests/.../Fakes/Gen2PopulationSimulator.cs`: quadros ALOHA, colisão, flags de session,
+probabilidade de leitura por tag, custo de slot vazio 0,3 ms e de leitura 2,5 ms):
+
+- Portal normal, 200 passagens, 50–100 tags, 20% fracas, 2–4 s no campo: todas as tags lidas em 200/200, 199
+  CONFIÁVEL.
+- Adverso, 200 passagens, 10–30% das tags quase invisíveis, 0,5–2 s no campo: 187 perderam tag e 186 foram sinalizadas.
+  A que passou como CONFIÁVEL é o caso indetectável sem referência externa: um grupo de tags que nunca respondeu
+  enquanto todas as lidas responderam em todas as rodadas.
+
+> [!CAUTION]
+> Os números acima são de simulação. Os comandos `0E`/`0C`/`12` seguem o manual MagicRF M100, mas **não foram
+> validados no R200 real** (o leitor ainda não tem antena). No primeiro teste com antena, confira no log que a
+> troca de target não derruba a taxa de leitura; se derrubar, use `Target` = `SingleA`.
+
+Referências: EPC Gen2 / ISO 18000-63 (Query, sessions S0–S3, flags A/B, algoritmo Q); manual de comandos MagicRF M100
+(`0E`, `0C`, `12`, `27`, `28`); [Atlas RFID, *Understanding EPC Gen 2 Search Modes and
+Sessions*](https://www.atlasrfidstore.com/rfid-insider/understanding-epc-gen-2-search-modes-and-sessions/) (single ×
+dual target, S2/S3 em portal); Chao (1987) e Colwell & Coddington (1994) para o estimador. Bibliotecas abertas do M100
+(ex.: [hex-in/libmagicrf](https://github.com/hex-in/libmagicrf), GPL-3.0) foram consultadas, nenhum código foi copiado.
 
 ### Leitor real
 
@@ -243,7 +308,7 @@ Notas de tipo estão em `db/schema.sql`.
   3. **Blindagem/absorvedores** e distância entre portais de docas adjacentes.
   4. **Filtro de RSSI** (`MinRssi`) e de antena (`AllowedAntennas`). O RSSI varia com orientação da tag, material (líquido e metal atenuam muito) e multipercurso, então o limiar é estatístico e não uma fronteira exata.
 - **Sem direção.** Um portal com uma antena não sabe se a tag está entrando ou saindo. Por isso a direção vem do operador (botões). Para automatizar, use duas antenas em sequência (ordem de leitura A→B) ou sensores de presença ou barreira. Isso fica fora do escopo atual.
-- **Leituras perdidas.** Tags sobre metal ou líquido, tags sobrepostas no pallet e tags desalinhadas com a polarização podem não ser lidas. Não existe garantia de 100% de leitura. Faça a conciliação periódica com inventário cíclico.
+- **Leituras perdidas.** Tags sobre metal ou líquido, tags sobrepostas no pallet e tags desalinhadas com a polarização podem não ser lidas. Não existe garantia de 100% de leitura. O veredito da passagem detecta a maior parte das perdas, mas não um grupo de tags que nunca respondeu. Faça a conciliação periódica com inventário cíclico.
 - **Troca de modo.** Um lote que já está dentro da transação no instante do clique termina com o modo em que as leituras chegaram, que é o correto. Na troca, as leituras pendentes da geração anterior são **descartadas** (requisito). O carimbo é feito na chegada ao host. Leituras que estavam no buffer interno do leitor no instante do clique chegam depois e recebem o modo novo. Evite trocar de modo com carga passando pelo portal.
 - **Relógio.** O timestamp vem do host em UTC, salvo quando o protocolo envia um timestamp próprio. Sincronize o relógio do leitor (NTP) se ele for usado.
 
@@ -273,7 +338,7 @@ Notas de tipo estão em `db/schema.sql`.
 ```bash
 git clone https://github.com/GZimbra/KRF-Reader.git && cd KRF-Reader
 dotnet run  --project src/KrfReader.UI        # conecta no R200 (COM3)
-dotnet test KrfReader.sln                     # 199 casos de teste, sem hardware e sem rede
+dotnet test KrfReader.sln                     # 238 casos de teste, sem hardware e sem rede
 dotnet publish src/KrfReader.UI -c Release -r win-x64   --self-contained -p:PublishSingleFile=true -o publish/win-x64
 dotnet publish src/KrfReader.UI -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true -o publish/linux-x64
 ```
@@ -306,6 +371,16 @@ Fontes (a última vence): `src/KrfReader.UI/appsettings.json` → `appsettings.L
 | | `QueueCapacity` | Capacidade da fila de entrada |
 | | `BatchSize` / `FlushIntervalMs` | Gatilhos do lote de gravação |
 | | `ShutdownTimeoutMs` | Tempo máximo de drenagem no encerramento |
+| `Reader.Inventory` | `Session` | Session Gen2 `S0`–`S3` (padrão `S2`) |
+| | `Target` | `DualAB` (alterna A/B a cada rodada) ou `SingleA` |
+| | `TargetDwellMs` | Duração da rodada (padrão 500 ms) |
+| | `InitialQ` / `AdaptiveQ` / `MinQ` / `MaxQ` | Q inicial (5), recálculo por rodada, limites (2–8) |
+| | `SelectEpcPrefix` | Prefixo hex para Select em RF (vazio = todas) |
+| | `CommandGapMs` | Pausa entre comandos de troca de parâmetro (15 ms) |
+| `Passage` | `SilenceMs` | Sem leitura por este tempo, a passagem fecha (2500 ms) |
+| | `StableRounds` | Rodadas sem EPC novo para convergir (3) |
+| | `MaxEstimatedMissed` | Limite do estimador Chao2 para CONFIÁVEL (0,5) |
+| | `MarginalRssiMarginDb` | Margem acima do `MinRssi` que marca tag marginal (6 dB) |
 | `Database` | `Provider` / `ConnectionString` | Hoje só `Sqlite` |
 
 ### Testes
@@ -315,7 +390,8 @@ Fontes (a última vence): `src/KrfReader.UI/appsettings.json` → `appsettings.L
 | `Domain/` | `InventoryRules.Decide` (tabela completa), normalização de EPC, validação do cadastro, literais do banco |
 | `Pipeline/` | Deduplicação por geração, filtro RSSI/antena, troca de modo, barreira de PARAR, shutdown, concorrência do estado de modo, captura para cadastro |
 | `Persistence/` | `SqliteInventoryRepository` contra SQLite real: criação, mudança de status, idempotência, anomalia, lote de 2000 leituras, consultas, cadastro de tags e migração de banco antigo |
-| `Readers/` | Parser `AsciiLine` (frames parciais, lixo), factory de protocolos, MockReader (fake de teste) |
+| `Readers/` | Parser `AsciiLine` (frames parciais, lixo), factory de protocolos, MockReader (fake de teste), comandos Gen2 do M100 e troca de parâmetros pelo transporte |
+| `Passage/` | Convergência, Chao2, silêncio, perda de dados; 50–100 tags no simulador Gen2 com Monte Carlo (400 passagens) |
 | `Integration/` | Ponta a ponta: leitor fake → pipeline → SQLite |
 
 ### Contribuição
@@ -327,6 +403,19 @@ Fontes (a última vence): `src/KrfReader.UI/appsettings.json` → `appsettings.L
 5. Configuração local fica em `appsettings.Local.json`, nunca no `appsettings.json` versionado.
 
 ## Decisões e Desafios
+
+<details>
+<summary><b>Garantia de leitura: medir em vez de prometer</b></summary>
+
+<br/>
+
+O pedido era garantir que todas as tags de uma carga fossem lidas, sem lista esperada (NF/ASN) para comparar. Sem
+referência externa, o software não sabe quantas tags existem. A escolha foi maximizar a leitura (S2, A/B, Q dinâmico,
+Select) e medir a convergência da descoberta (rodadas sem EPC novo + Chao2). Custo: uma passagem rápida demais nunca
+sai CONFIÁVEL mesmo que tenha lido tudo, e um grupo de tags que nunca responde continua invisível. Se um dia houver
+NF/ASN, a conferência esperado × lido fecha esse buraco.
+
+</details>
 
 <details>
 <summary><b>Avalonia em vez de WPF</b></summary>

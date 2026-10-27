@@ -16,6 +16,7 @@ public sealed class ReaderProtocolFactory : IReaderProtocolFactory
     public ReaderProtocolFactory()
     {
         Register(AsciiLineProtocol.ProtocolName, static () => new AsciiLineProtocol());
+        Register(R200Protocol.ProtocolName, static () => new R200Protocol());
     }
 
     public IReadOnlyCollection<string> AvailableProtocols

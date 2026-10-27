@@ -31,6 +31,15 @@ public interface IReaderProtocol
     void Reset();
 }
 
+/// <summary>
+/// Opcional para <see cref="IReaderProtocol"/>: leitores cujo inventário contínuo termina sozinho (número finito de
+/// rodadas). Enquanto o inventário estiver ativo, o transporte reenvia o comando de início a cada intervalo.
+/// </summary>
+public interface IInventoryRefreshProtocol
+{
+    TimeSpan InventoryRefreshInterval { get; }
+}
+
 /// <summary>Registro de protocolos por nome. Novo protocolo = nova classe + registro.</summary>
 public interface IReaderProtocolFactory
 {

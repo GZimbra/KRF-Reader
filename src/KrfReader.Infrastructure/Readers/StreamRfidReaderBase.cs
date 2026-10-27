@@ -32,6 +32,7 @@ public abstract class StreamRfidReaderBase : IRfidReader
     private Stream? _stream;
     private CancellationTokenSource? _sessionCts;
     private Task? _readTask;
+    private Task? _refreshTask;
     private volatile bool _session;
     private volatile bool _linkUp;
     private volatile bool _running;
@@ -92,6 +93,8 @@ public abstract class StreamRfidReaderBase : IRfidReader
             _linkUp = true;
             _session = true;
             _readTask = Task.Run(() => ReadLoopAsync(stream, cts.Token), CancellationToken.None);
+            if (_protocol is IInventoryRefreshProtocol { InventoryRefreshInterval: var interval } && interval > TimeSpan.Zero)
+                _refreshTask = Task.Run(() => RefreshLoopAsync(interval, cts.Token), CancellationToken.None);
             Logger?.LogInformation("Leitor {Reader} conectado.", Name);
         }
         finally
@@ -114,8 +117,10 @@ public abstract class StreamRfidReaderBase : IRfidReader
             _session = false;
             var cts = _sessionCts;
             var readTask = _readTask;
+            var refreshTask = _refreshTask;
             _sessionCts = null;
             _readTask = null;
+            _refreshTask = null;
             cts?.Cancel();
 
             await _io.WaitAsync(CancellationToken.None).ConfigureAwait(false);
@@ -141,6 +146,18 @@ public abstract class StreamRfidReaderBase : IRfidReader
                 catch (Exception ex)
                 {
                     Logger?.LogDebug(ex, "Loop de leitura de {Reader} terminou com exceção.", Name);
+                }
+            }
+
+            if (refreshTask is not null)
+            {
+                try
+                {
+                    await refreshTask.ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    Logger?.LogDebug(ex, "Loop de rearme de {Reader} terminou com exceção.", Name);
                 }
             }
 
@@ -276,6 +293,38 @@ public abstract class StreamRfidReaderBase : IRfidReader
             }
 
             Process(buffer.AsSpan(0, read));
+        }
+    }
+
+    /// <summary>Reenvia o início de inventário periodicamente (<see cref="IInventoryRefreshProtocol"/>).</summary>
+    private async Task RefreshLoopAsync(TimeSpan interval, CancellationToken ct)
+    {
+        try
+        {
+            using var timer = new PeriodicTimer(interval, _time);
+            while (await timer.WaitForNextTickAsync(ct).ConfigureAwait(false))
+            {
+                await _io.WaitAsync(ct).ConfigureAwait(false);
+                try
+                {
+                    // Checado sob _io: StopCoreAsync zera _running antes de enviar a parada, então um rearme
+                    // nunca sai depois do comando de parada.
+                    if (!_running || !_linkUp || _stream is not { } stream)
+                        continue;
+                    await WriteCommandAsync(stream, _protocol.BuildStartInventoryCommand(), ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    RaiseError("Falha ao rearmar o inventário.", ex);
+                }
+                finally
+                {
+                    _io.Release();
+                }
+            }
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
         }
     }
 

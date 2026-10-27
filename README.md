@@ -1,66 +1,122 @@
-<p align="center">
-  <img src="src/KrfReader.UI/Assets/krf-logo.svg" alt="KRF Reader" width="320">
-</p>
+<div align="center">
+  <img src="src/KrfReader.UI/Assets/krf-mark.svg" width="128" alt="Logo do KRF Reader" />
 
-<p align="center">
-  <strong>Controle de entrada e saída de estoque por RFID UHF.</strong><br>
-  Aplicação desktop em .NET 8 + Avalonia 11, com SQLite e driver de leitor desacoplado do fabricante.
-</p>
+  <h1>《 KRF Reader — Controle de entrada e saída de estoque por RFID UHF 》</h1>
 
-<p align="center">
-  <img alt=".NET 8" src="https://img.shields.io/badge/.NET-8.0-512BD4">
-  <img alt="Avalonia 11" src="https://img.shields.io/badge/UI-Avalonia%2011-FFA600">
-  <img alt="SQLite" src="https://img.shields.io/badge/DB-SQLite-003B57">
-  <img alt="Plataformas" src="https://img.shields.io/badge/plataformas-Windows%20%7C%20Linux%20%7C%20macOS-191919">
-</p>
+  <p>Aplicação desktop em C# / .NET 8 com interface Avalonia 11. Lê tags RFID UHF num portal (doca, porta de almoxarifado), aplica a direção escolhida pelo operador e mantém o status de cada tag em SQLite. O driver do leitor é desacoplado do fabricante.</p>
 
----
+  <p>
+    <img src="https://img.shields.io/badge/.NET-8.0-512BD4?style=flat-square&amp;logo=dotnet&amp;logoColor=white" alt=".NET 8" />
+    <img src="https://img.shields.io/badge/UI-Avalonia%2011.3-FFA600?style=flat-square" alt="Avalonia 11.3" />
+    <img src="https://img.shields.io/badge/Banco-SQLite%20%2B%20Dapper-003B57?style=flat-square&amp;logo=sqlite&amp;logoColor=white" alt="SQLite com Dapper" />
+    <img src="https://img.shields.io/badge/Leitor-Mock%20%7C%20Serial%20%7C%20TCP-191919?style=flat-square" alt="Leitor Mock, Serial ou TCP" />
+    <img src="https://img.shields.io/badge/Plataformas-Windows%20%7C%20Linux%20%7C%20macOS-555555?style=flat-square" alt="Windows, Linux e macOS" />
+    <img src="https://img.shields.io/badge/Testes-90%20casos%20xUnit-2E7D32?style=flat-square" alt="90 casos de teste xUnit" />
+  </p>
+</div>
 
-O KRF Reader lê tags RFID UHF num portal (doca, porta de almoxarifado) e mantém o status de cada tag no banco. O operador escolhe a direção do fluxo:
-
-- **ENTRADA** ativo: toda tag lida fica `DENTRO`.
-- **SAÍDA** ativo: toda tag lida fica `FORA`.
-- **PARAR**: encerra o inventário e grava o que já foi lido no modo vigente.
-
-A tag carrega apenas o EPC. Toda a lógica de estoque fica no sistema e no banco.
+> [!WARNING]
+> O código foi validado com 90 casos de teste automatizados e com o **MockReader** (simulador). **Não foi exercitado
+> contra um leitor UHF físico**: o modelo do leitor ainda não está definido e só o protocolo `AsciiLine` vem pronto.
+> UHF lê fora da zona de interesse; o software mitiga leituras fantasma, mas não resolve. Leia
+> [Limitações físicas do UHF](#limitações-físicas-do-uhf) antes de instalar.
 
 ## Sumário
 
-- [Telas](#telas)
-- [Início rápido](#início-rápido)
-- [Uso](#uso)
-- [Configuração](#configuração-srckrfreaderuiappsettingsjson)
-- [Regras de negócio](#regras-de-negócio-implementadas)
-- [Arquitetura](#arquitetura)
-- [Leitor real e novos drivers](#como-configurar-o-leitor-real)
-- [Trocar o banco](#trocar-o-banco-sql-server--postgresql)
-- [Limitações físicas do UHF](#limitações-físicas-do-uhf-leia-antes-de-instalar)
-- [Decisões de arquitetura](#decisões-de-arquitetura)
-- [Testes](#testes)
-- [Publicação](#publicação)
-- [Contribuição](#contribuição)
+- [Sobre o Repositório](#sobre-o-repositório)
+- [Módulos](#módulos)
+  - [Mapa do código](#mapa-do-código)
+- [Projeto](#projeto)
+  - [Interface gráfica](#interface-gráfica)
+  - [Regras de negócio](#regras-de-negócio)
+  - [Pipeline de leituras](#pipeline-de-leituras)
+  - [Leitor real](#leitor-real)
+  - [Novo driver](#novo-driver)
+  - [Trocar o banco](#trocar-o-banco)
+  - [Limitações físicas do UHF](#limitações-físicas-do-uhf)
+- [Tecnologias](#tecnologias)
+- [Como Rodar](#como-rodar)
+  - [Requisitos](#requisitos)
+  - [Build, testes e publish](#build-testes-e-publish)
+  - [Configuração](#configuração)
+  - [Testes](#testes)
+  - [Contribuição](#contribuição)
+- [Decisões e Desafios](#decisões-e-desafios)
 
-## Telas
+## Sobre o Repositório
 
-| Operação | Consulta | Configuração |
-|---|---|---|
-| ![Operação](docs/screenshots/operacao.png) | ![Consulta](docs/screenshots/consulta.png) | ![Configuração](docs/screenshots/configuracao.png) |
+O **KRF Reader** controla entrada e saída de estoque num portal RFID UHF. O operador escolhe a direção do fluxo:
 
-## Início rápido
+- **ENTRADA:** toda tag lida fica `DENTRO`.
+- **SAÍDA:** toda tag lida fica `FORA`.
+- **PARAR:** encerra o inventário e grava o que já foi lido no modo vigente.
 
-Requisito: [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0). Não precisa de leitor físico.
+A tag carrega apenas o EPC. Toda a lógica de estoque fica no sistema e no banco. Não há servidor, nuvem ou
+telemetria: o app fala só com o leitor (serial ou TCP) e com o SQLite local.
 
-```bash
-git clone https://github.com/GZimbra/KRF-Reader.git
-cd KRF-Reader
-dotnet run --project src/KrfReader.UI
+## Módulos
+
+| Módulo | Entrega | Descrição |
+| --- | --- | --- |
+| Interface | `KrfReader.UI` | Avalonia 11 (MVVM): abas Operação, Consulta e Configuração. Composition root e `appsettings.json`. |
+| Domínio | `KrfReader.Domain` | Regra pura (`InventoryRules.Decide`), enums, `TagRead`, `Epc`. Sem dependências. |
+| Aplicação | `KrfReader.Application` | Contratos (`IRfidReader`, `IReaderProtocol`, `IInventoryRepository`, `IInventoryPipeline`), options e pipeline concorrente. |
+| Infraestrutura | `KrfReader.Infrastructure` | Drivers de leitor (Mock, Serial, TCP), protocolos plugáveis e repositório SQLite. |
+| Testes | `tests/KrfReader.Tests` | xUnit: domínio, dedup, troca de modo, idempotência, anomalia, SQLite, parser, ponta a ponta. |
+
+### Mapa do código
+
+```text
+KRF-Reader/
+├── KrfReader.sln
+├── Directory.Build.props              # net8.0, nullable, implicit usings
+├── Directory.Packages.props           # versões centralizadas (Avalonia 11.3.22, Dapper, Sqlite)
+├── db/schema.sql                      # schema (também embutido e aplicado no start)
+├── docs/screenshots/                  # telas usadas neste README
+├── src/
+│   ├── KrfReader.Domain/              # InventoryRules, Epc, TagRead, TagState, InventoryEvent, DbLiterals
+│   ├── KrfReader.Application/
+│   │   ├── Configuration/             # ReaderOptions, PipelineOptions, DatabaseOptions
+│   │   ├── Persistence/               # IInventoryRepository
+│   │   ├── Pipeline/                  # InventoryPipeline, Deduplicator, ReadFilter, ModeState
+│   │   └── Readers/                   # IRfidReader, IReaderProtocol, IRfidReaderFactory
+│   ├── KrfReader.Infrastructure/
+│   │   ├── Persistence/               # SqliteInventoryRepository (Dapper, upsert em lote)
+│   │   └── Readers/                   # MockReader, GenericSerialReader, GenericTcpReader, Protocols/AsciiLine
+│   └── KrfReader.UI/                  # App, MainWindow, ViewModels, CompositionRoot, Assets
+└── tests/KrfReader.Tests/             # Domain, Pipeline, Persistence, Readers, Integration, Fakes
 ```
 
-O app sobe com o **MockReader**, um simulador com população de tags, tags entrando e saindo do campo, rajadas de releitura e leituras fantasma de RSSI baixo. Clique em **ENTRADA**, veja as leituras chegarem e os contadores mudarem, depois **PARAR**.
+| Arquivo | Responsabilidade |
+| --- | --- |
+| [Domain/InventoryRules.cs](src/KrfReader.Domain/InventoryRules.cs) | Decide o novo status e o evento a partir do status atual e do modo. Função pura. |
+| [Domain/Epc.cs](src/KrfReader.Domain/Epc.cs) | Normaliza e valida o EPC. |
+| [Pipeline/InventoryPipeline.cs](src/KrfReader.Application/Pipeline/InventoryPipeline.cs) | Channels de entrada e persistência, workers particionados por EPC, lote, barreira de PARAR e shutdown. |
+| [Pipeline/ModeState.cs](src/KrfReader.Application/Pipeline/ModeState.cs) | Modo atual e geração; carimba cada leitura na chegada. |
+| [Pipeline/Deduplicator.cs](src/KrfReader.Application/Pipeline/Deduplicator.cs) | Ignora a mesma tag na mesma geração dentro de `DedupWindowSeconds`. |
+| [Pipeline/ReadFilter.cs](src/KrfReader.Application/Pipeline/ReadFilter.cs) | Filtro de RSSI mínimo e antenas aceitas. |
+| [Readers/StreamRfidReaderBase.cs](src/KrfReader.Infrastructure/Readers/StreamRfidReaderBase.cs) | Base de serial/TCP: transporte, reconexão e threading. |
+| [Readers/Protocols/AsciiLineProtocol.cs](src/KrfReader.Infrastructure/Readers/Protocols/AsciiLineProtocol.cs) | Parser `EPC,RSSI,ANTENA[,TIMESTAMP]` com frames parciais. |
+| [Readers/MockReader.cs](src/KrfReader.Infrastructure/Readers/MockReader.cs) | Simulador: população de tags, entrada e saída do campo, rajadas e leituras fantasma. |
+| [Persistence/SqliteInventoryRepository.cs](src/KrfReader.Infrastructure/Persistence/SqliteInventoryRepository.cs) | Aplica o lote numa transação: carrega estado, decide, faz upsert e insere eventos. |
+| [UI/CompositionRoot.cs](src/KrfReader.UI/CompositionRoot.cs) | Monta configuração, factories, repositório e pipeline. |
 
-O banco SQLite (`krf-reader.db`) é criado no diretório de execução, com o schema aplicado no start. Para criar manualmente: `sqlite3 krf-reader.db < db/schema.sql`.
+## Projeto
 
-## Uso
+### Interface gráfica
+
+<div align="center">
+  <img src="docs/screenshots/operacao.png" width="820" alt="KRF Reader: aba Operação" />
+  <br/><sub>Operação: modo ativo, contadores, leituras ao vivo e anomalias</sub>
+  <br/><br/>
+  <img src="docs/screenshots/consulta.png" width="820" alt="KRF Reader: aba Consulta" />
+  <br/><sub>Consulta por trecho de EPC</sub>
+  <br/><br/>
+  <img src="docs/screenshots/configuracao.png" width="820" alt="KRF Reader: aba Configuração" />
+  <br/><sub>Configuração do leitor e do filtro de leituras</sub>
+</div>
+
+<br/>
 
 **OPERAÇÃO.** Botões ENTRADA, SAÍDA e PARAR. Mostra o modo ativo, o status do leitor, os contadores (tags dentro, tags fora, lidas nesta sessão) e as últimas 200 leituras aplicadas, com EPC, antena, RSSI e resultado. Saída aparece em vermelho; anomalias (saída sem entrada) ficam num painel separado.
 
@@ -73,31 +129,9 @@ O banco SQLite (`krf-reader.db`) é criado no diretório de execução, com o sc
 
 Fechar a janela com modo ativo grava as leituras pendentes antes de sair ("Encerrando...").
 
-## Configuração (`src/KrfReader.UI/appsettings.json`)
+Saída usa vermelho; o laranja do tema é reservado a destaque.
 
-Tudo é lido no start, sem recompilar. Para sobrescrever localmente sem versionar, crie `appsettings.Local.json` ao lado do executável.
-
-| Seção | Chave | Significado |
-|---|---|---|
-| `Reader` | `Type` | `Mock`, `Serial` ou `Tcp` |
-| | `Protocol` | Protocolo registrado para Serial/Tcp (padrão `AsciiLine`) |
-| | `Serial.PortName` / `BaudRate` / `DataBits` / `Parity` / `StopBits` | Porta serial |
-| | `Tcp.Host` / `Port` / `ConnectTimeoutMs` | Leitor em rede |
-| | `PowerDbm` | Potência de transmissão (0–33 dBm). É o principal controle de alcance. |
-| | `Antennas` | Portas de antena ativas no leitor |
-| | `ReconnectDelayMs` | Espera entre tentativas de reconexão automática |
-| `Pipeline` | `DedupWindowSeconds` | Janela de deduplicação |
-| | `MinRssi` | RSSI mínimo aceito (dBm). Filtro de leitura fantasma. |
-| | `AllowedAntennas` | Antenas aceitas pelo filtro (`[]` = todas) |
-| | `WorkerCount` | Workers de filtro/dedup |
-| | `QueueCapacity` | Capacidade da fila de entrada |
-| | `BatchSize` / `FlushIntervalMs` | Gatilhos do lote de gravação |
-| | `ShutdownTimeoutMs` | Tempo máximo de drenagem no encerramento |
-| `Database` | `Provider` / `ConnectionString` | Hoje só `Sqlite` |
-
-Leitor, porta e potência também podem ser trocados na aba **Configuração**, com "Aplicar leitor", que recria a conexão. O RSSI mínimo e as antenas do filtro valem na hora.
-
-## Regras de negócio implementadas
+### Regras de negócio
 
 | Status atual | Modo | Resultado | Evento gravado |
 |---|---|---|---|
@@ -111,49 +145,34 @@ Leitor, porta e potência também podem ser trocados na aba **Configuração**, 
 - `Eventos` guarda (EPC, modo, tipo, timestamp, antena, RSSI) de toda mudança de estado e anomalia. `Tags` é a projeção do estado atual, atualizada **na mesma transação** que o evento.
 - **Deduplicação**: a mesma tag na mesma *sessão de modo* dentro de `DedupWindowSeconds` é ignorada antes de chegar ao banco. A chave usa a geração, e não apenas o modo. Com uma chave só por modo, ENTRADA → SAÍDA → ENTRADA em menos de N segundos faria a segunda entrada ser ignorada.
 
-## Arquitetura
+### Pipeline de leituras
 
-```
-src/
-  KrfReader.Domain/           Regra pura (InventoryRules.Decide), enums, TagRead, Epc. Sem dependências.
-  KrfReader.Application/      Contratos (IRfidReader, IReaderProtocol, IInventoryRepository, IInventoryPipeline),
-                              Options e o pipeline concorrente (InventoryPipeline, Deduplicator, ReadFilter, ModeState).
-  KrfReader.Infrastructure/
-    Readers/                  MockReader, GenericSerialReader, GenericTcpReader, protocolos plugáveis, factories.
-    Persistence/              SqliteInventoryRepository (Dapper, upsert em lote).
-  KrfReader.UI/               Avalonia 11 (MVVM), composition root, appsettings.json.
-tests/KrfReader.Tests/        xUnit: domínio, dedup, troca de modo, idempotência, anomalia, SQLite, parser, ponta a ponta.
-db/schema.sql                 Script de criação do banco (também embutido e aplicado no start).
-```
-
-### Pipeline de threads
-
-```
- leitor (thread do driver)
-   │  evento TagRead → carimba (modo, geração) → TryWrite        [nunca bloqueia o driver]
-   ▼
- Channel<T> bounded de entrada  (cheio = descarta e conta "QueueDropped")
-   ▼
- dispatcher ── hash(EPC) % N ──► worker 1..N   (filtro RSSI/antena + deduplicação, sem lock por partição)
-   ▼
- Channel<T> de persistência
-   ▼
- worker de lote (único escritor): acumula até BatchSize ou FlushIntervalMs → 1 transação → BatchPersisted
-   ▼
- UI (Dispatcher.UIThread, drenagem a cada 250 ms)
+```mermaid
+flowchart TD
+    R[Leitor<br/>thread do driver] -->|TagRead| S[Carimbo de modo + geração<br/>TryWrite, nunca bloqueia]
+    S --> Q[Channel bounded de entrada]
+    Q -- cheio --> D[Descarta e conta<br/>QueueDropped]
+    Q --> H{hash EPC % N}
+    H --> W[Workers 1..N<br/>filtro RSSI/antena + dedup]
+    W --> P[Channel de persistência]
+    P --> B[Worker de lote, único escritor<br/>BatchSize ou FlushIntervalMs]
+    B --> DB[(SQLite<br/>1 transação por lote)]
+    B --> UI[UI<br/>drenagem a cada 250 ms]
+    M[ENTRADA / SAÍDA / PARAR] -. nova geração .-> S
+    M -. barreira de flush .-> Q
 ```
 
 - **Geração de modo.** Cada troca de modo (ou PARAR) incrementa um contador de geração. Toda leitura é carimbada com o modo e a geração **no instante em que chega do leitor**. Item com geração antiga é descartado em qualquer estágio (fila, worker, buffer de lote). Por isso uma leitura antiga nunca recebe o modo novo.
 - **PARAR** usa uma *barreira de flush*: um marcador percorre fila → workers → persistência, e o lote pendente da geração atual é gravado antes de o modo virar "parado".
 - **Shutdown** (fechar a janela): para o leitor, completa os channels em cascata, drena, persiste e encerra com timeout (`ShutdownTimeoutMs`).
 
-## Como configurar o leitor real
+### Leitor real
 
 1. Descubra no manual o meio físico (RS-232/USB-serial, TCP, ou SDK) e o protocolo (LLRP, proprietário binário/ASCII).
 2. Se o leitor fala **ASCII por linha** (`EPC,RSSI,ANTENA[,TIMESTAMP]`), basta configurar `Reader.Type` = `Serial`/`Tcp` com `Protocol` = `AsciiLine`.
 3. Ajuste `PowerDbm` e `Antennas`. Depois, com tags posicionadas **na borda da zona de interesse** e **logo fora dela**, observe o RSSI na lista ao vivo e calibre `MinRssi` entre os dois valores.
 
-## Como implementar um novo driver
+### Novo driver
 
 Existem dois pontos de extensão, conforme o caso:
 
@@ -184,7 +203,7 @@ Depois disso, basta usar `"Protocol": "AcmeBinary"` no appsettings. `Feed` é st
 
 O resto (pipeline, banco, UI) não muda.
 
-## Trocar o banco (SQL Server / PostgreSQL)
+### Trocar o banco
 
 Implemente `IInventoryRepository` (ex.: `PostgresInventoryRepository`) e escolha pela `Database.Provider` no composition root. O algoritmo de `ApplyBatchAsync` (carregar estado → `InventoryRules.Decide` → upsert → inserir eventos, numa transação) é o mesmo:
 
@@ -193,7 +212,7 @@ Implemente `IInventoryRepository` (ex.: `PostgresInventoryRepository`) e escolha
 
 Notas de tipo estão em `db/schema.sql`.
 
-## Limitações físicas do UHF (leia antes de instalar)
+### Limitações físicas do UHF
 
 - **Leituras fantasma.** Um leitor de ~20 m lê tags fora da zona de interesse: prateleira vizinha, pallet parado ao lado da doca, reflexão em metal. Em modo SAÍDA, isso marca como FORA uma tag que nunca saiu. **O software mitiga, mas não resolve.** As mitigações, em ordem de eficácia:
   1. **Geometria da antena**: antena direcional (polarização circular, feixe estreito) apontada para o portal, longe de estoque parado.
@@ -205,20 +224,67 @@ Notas de tipo estão em `db/schema.sql`.
 - **Troca de modo.** Um lote que já está dentro da transação no instante do clique termina com o modo em que as leituras chegaram, que é o correto. Na troca, as leituras pendentes da geração anterior são **descartadas** (requisito). O carimbo é feito na chegada ao host. Leituras que estavam no buffer interno do leitor no instante do clique chegam depois e recebem o modo novo. Evite trocar de modo com carga passando pelo portal.
 - **Relógio.** O timestamp vem do host em UTC, salvo quando o protocolo envia um timestamp próprio. Sincronize o relógio do leitor (NTP) se ele for usado.
 
-## Decisões de arquitetura
+## Tecnologias
 
-- **Avalonia em vez de WPF**: WPF só compila e roda em Windows. Avalonia roda em Windows, Linux e macOS e permitiu compilar e testar em CI Linux. A UI é MVVM pura, então portar para WPF custa só XAML.
-- **`Eventos` não registra releitura idempotente.** "Todo evento no histórico" combinado com "releitura não gera evento" só é consistente se o histórico for de mudanças de estado. Registrar toda leitura deduplicada geraria 1 linha a cada `DedupWindowSeconds` por tag parada no campo, ou seja, o mesmo flood que a deduplicação deveria evitar. A última leitura fica em `Tags.UltimaLeitura`.
-- **Descarte na troca de modo.** Como cada leitura já carrega o próprio modo, seria seguro persistir o pendente da geração anterior com o modo dela. O descarte perde leituras válidas feitas logo antes do clique. Ele foi mantido por ser requisito explícito e é trivial de mudar em `InventoryPipeline`.
-- **Dapper com upsert em lote numa transação.** No SQLite, executar o mesmo comando preparado N vezes dentro de uma transação é a forma mais rápida de fazer upsert. Não existe ganho real em montar um `VALUES` multi-linha.
+| Camada | Tecnologia |
+| --- | --- |
+| Linguagem e runtime | C# (`LangVersion` latest), .NET 8, `Nullable` |
+| Interface | Avalonia 11.3 (Fluent, fonte Inter) + CommunityToolkit.Mvvm 8.4 |
+| Persistência | SQLite (Microsoft.Data.Sqlite 8.0) + Dapper 2.1 |
+| Leitor | System.IO.Ports 8.0 (serial), `TcpClient` (rede), protocolos plugáveis |
+| Concorrência | `System.Threading.Channels` (bounded) |
+| Configuração | Microsoft.Extensions.Configuration (JSON) + DependencyInjection + Logging |
+| Testes | xUnit 2.9 + Microsoft.Extensions.TimeProvider.Testing |
+| Distribuição | `dotnet publish` single-file, self-contained |
 
-## Testes
+## Como Rodar
+
+### Requisitos
+
+* .NET 8 SDK para compilar. O executável publicado é *self-contained*, sem runtime instalado.
+* Windows, Linux ou macOS.
+* Leitor físico é opcional: o app sobe com o **MockReader**.
+
+### Build, testes e publish
 
 ```bash
-dotnet test KrfReader.sln
+git clone https://github.com/GZimbra/KRF-Reader.git && cd KRF-Reader
+dotnet run  --project src/KrfReader.UI        # sobe com o MockReader
+dotnet test KrfReader.sln                     # 90 casos de teste, sem hardware e sem rede
+dotnet publish src/KrfReader.UI -c Release -r win-x64   --self-contained -p:PublishSingleFile=true -o publish/win-x64
+dotnet publish src/KrfReader.UI -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true -o publish/linux-x64
 ```
 
-90 testes em xUnit (`tests/KrfReader.Tests`), sem hardware e sem rede:
+Com o Mock: clique em **ENTRADA**, veja as leituras chegarem e os contadores mudarem, depois **PARAR**. O banco
+`krf-reader.db` é criado no diretório de execução, com o schema aplicado no start (manual:
+`sqlite3 krf-reader.db < db/schema.sql`). Em produção, aponte `Database.ConnectionString` para um caminho absoluto
+com permissão de escrita. `appsettings.json` já vai na saída do publish.
+
+### Configuração
+
+Fontes (a última vence): `src/KrfReader.UI/appsettings.json` → `appsettings.Local.json` ao lado do executável
+(ignorado pelo git). Tudo é lido no start, sem recompilar. Leitor, porta e potência também mudam na aba
+**Configuração** (*Aplicar leitor* recria a conexão); RSSI mínimo e antenas do filtro valem na hora.
+
+| Seção | Chave | Significado |
+|---|---|---|
+| `Reader` | `Type` | `Mock`, `Serial` ou `Tcp` |
+| | `Protocol` | Protocolo registrado para Serial/Tcp (padrão `AsciiLine`) |
+| | `Serial.PortName` / `BaudRate` / `DataBits` / `Parity` / `StopBits` | Porta serial |
+| | `Tcp.Host` / `Port` / `ConnectTimeoutMs` | Leitor em rede |
+| | `PowerDbm` | Potência de transmissão (0–33 dBm). É o principal controle de alcance. |
+| | `Antennas` | Portas de antena ativas no leitor |
+| | `ReconnectDelayMs` | Espera entre tentativas de reconexão automática |
+| `Pipeline` | `DedupWindowSeconds` | Janela de deduplicação |
+| | `MinRssi` | RSSI mínimo aceito (dBm). Filtro de leitura fantasma. |
+| | `AllowedAntennas` | Antenas aceitas pelo filtro (`[]` = todas) |
+| | `WorkerCount` | Workers de filtro/dedup |
+| | `QueueCapacity` | Capacidade da fila de entrada |
+| | `BatchSize` / `FlushIntervalMs` | Gatilhos do lote de gravação |
+| | `ShutdownTimeoutMs` | Tempo máximo de drenagem no encerramento |
+| `Database` | `Provider` / `ConnectionString` | Hoje só `Sqlite` |
+
+### Testes
 
 | Pasta | Cobre |
 |---|---|
@@ -228,24 +294,74 @@ dotnet test KrfReader.sln
 | `Readers/` | Parser `AsciiLine` (frames parciais, lixo), factory de protocolos, MockReader |
 | `Integration/` | Ponta a ponta: leitor fake → pipeline → SQLite |
 
-## Publicação
-
-Executável autocontido, sem exigir .NET instalado na máquina do operador:
-
-```bash
-# Windows
-dotnet publish src/KrfReader.UI -c Release -r win-x64 --self-contained -p:PublishSingleFile=true -o publish/win-x64
-
-# Linux
-dotnet publish src/KrfReader.UI -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true -o publish/linux-x64
-```
-
-Copie `appsettings.json` (já vai na saída) e, se usar, `appsettings.Local.json` para a mesma pasta do executável. O banco é criado no diretório de trabalho do processo: em produção, aponte `Database.ConnectionString` para um caminho absoluto com permissão de escrita.
-
-## Contribuição
+### Contribuição
 
 1. Crie um branch a partir de `main`.
-2. Mantenha as dependências apontando para dentro: `Domain` ← `Application` ← `Infrastructure` ← `UI`. `Domain` não referencia nada.
-3. Driver novo entra em `Infrastructure/Readers/` e é registrado no composition root; nada fora disso deve mudar.
+2. Dependências apontam para dentro: `Domain` ← `Application` ← `Infrastructure` ← `UI`. `Domain` não referencia nada.
+3. Driver novo entra em `Infrastructure/Readers/` e é registrado no composition root; nada fora disso muda.
 4. Toda regra nova vem com teste. `dotnet test` precisa passar antes do PR.
-5. Configuração local fica em `appsettings.Local.json` (ignorado pelo git), nunca no `appsettings.json` versionado.
+5. Configuração local fica em `appsettings.Local.json`, nunca no `appsettings.json` versionado.
+
+## Decisões e Desafios
+
+<details>
+<summary><b>Avalonia em vez de WPF</b></summary>
+
+<br/>
+
+WPF só compila e roda em Windows. Avalonia roda em Windows, Linux e macOS e permitiu compilar e testar em Linux. A UI
+é MVVM pura, então portar para WPF custa só XAML.
+
+</details>
+
+<details>
+<summary><b>Histórico só de mudanças de estado</b></summary>
+
+<br/>
+
+"Todo evento no histórico" combinado com "releitura não gera evento" só é consistente se o histórico for de mudanças
+de estado. Registrar toda leitura deduplicada geraria 1 linha a cada `DedupWindowSeconds` por tag parada no campo, o
+mesmo flood que a deduplicação deveria evitar. A última leitura fica em `Tags.UltimaLeitura`.
+
+</details>
+
+<details>
+<summary><b>Deduplicação por geração, não por modo</b></summary>
+
+<br/>
+
+Com chave só por modo, ENTRADA → SAÍDA → ENTRADA em menos de `DedupWindowSeconds` faria a segunda entrada ser
+ignorada. A chave é (EPC, geração do modo), e a geração muda a cada clique.
+
+</details>
+
+<details>
+<summary><b>Descarte das pendentes na troca de modo</b></summary>
+
+<br/>
+
+Como cada leitura já carrega o próprio modo, seria seguro persistir o pendente da geração anterior com o modo dela.
+O descarte perde leituras válidas feitas logo antes do clique. Foi mantido por ser requisito explícito e é trivial de
+mudar em `InventoryPipeline`.
+
+</details>
+
+<details>
+<summary><b>Upsert em lote numa transação com Dapper</b></summary>
+
+<br/>
+
+No SQLite, executar o mesmo comando preparado N vezes dentro de uma transação é a forma mais rápida de fazer upsert.
+Não há ganho real em montar um `VALUES` multi-linha. Um único escritor elimina contenção de lock no arquivo.
+
+</details>
+
+<details>
+<summary><b>Validado sem leitor físico</b></summary>
+
+<br/>
+
+O pipeline, o banco e o parser foram testados com leitor fake, MockReader e SQLite real. O leitor de produção ainda
+não está definido; quando estiver, o primeiro passo é calibrar `PowerDbm` e `MinRssi` no portal real.
+
+</details>

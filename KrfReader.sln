@@ -1,0 +1,57 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 17
+VisualStudioVersion = 17.0.31903.59
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "src", "src", "{FEA4FF9B-1EC5-486B-981F-2A1975D7C67C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KrfReader.Domain", "src\KrfReader.Domain\KrfReader.Domain.csproj", "{2F6D87AC-4719-4BF9-A884-BE994D5CD144}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KrfReader.Application", "src\KrfReader.Application\KrfReader.Application.csproj", "{134CE0A6-1E22-4CA8-BA91-A3D9B6221104}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KrfReader.Infrastructure", "src\KrfReader.Infrastructure\KrfReader.Infrastructure.csproj", "{510F49B5-5456-4676-BCE4-C770F0452CA3}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{A4889150-11B9-400F-A92C-601D102F786D}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KrfReader.Tests", "tests\KrfReader.Tests\KrfReader.Tests.csproj", "{AD4613ED-8877-4941-9A3C-A9E16593439C}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "KrfReader.UI", "src\KrfReader.UI\KrfReader.UI.csproj", "{3C3629A8-9201-4590-9CEA-9C5CBA44C3CE}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{2F6D87AC-4719-4BF9-A884-BE994D5CD144}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2F6D87AC-4719-4BF9-A884-BE994D5CD144}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2F6D87AC-4719-4BF9-A884-BE994D5CD144}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2F6D87AC-4719-4BF9-A884-BE994D5CD144}.Release|Any CPU.Build.0 = Release|Any CPU
+		{134CE0A6-1E22-4CA8-BA91-A3D9B6221104}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{134CE0A6-1E22-4CA8-BA91-A3D9B6221104}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{134CE0A6-1E22-4CA8-BA91-A3D9B6221104}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{134CE0A6-1E22-4CA8-BA91-A3D9B6221104}.Release|Any CPU.Build.0 = Release|Any CPU
+		{510F49B5-5456-4676-BCE4-C770F0452CA3}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{510F49B5-5456-4676-BCE4-C770F0452CA3}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{510F49B5-5456-4676-BCE4-C770F0452CA3}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{510F49B5-5456-4676-BCE4-C770F0452CA3}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AD4613ED-8877-4941-9A3C-A9E16593439C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AD4613ED-8877-4941-9A3C-A9E16593439C}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AD4613ED-8877-4941-9A3C-A9E16593439C}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AD4613ED-8877-4941-9A3C-A9E16593439C}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3C3629A8-9201-4590-9CEA-9C5CBA44C3CE}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3C3629A8-9201-4590-9CEA-9C5CBA44C3CE}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3C3629A8-9201-4590-9CEA-9C5CBA44C3CE}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3C3629A8-9201-4590-9CEA-9C5CBA44C3CE}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{2F6D87AC-4719-4BF9-A884-BE994D5CD144} = {FEA4FF9B-1EC5-486B-981F-2A1975D7C67C}
+		{134CE0A6-1E22-4CA8-BA91-A3D9B6221104} = {FEA4FF9B-1EC5-486B-981F-2A1975D7C67C}
+		{510F49B5-5456-4676-BCE4-C770F0452CA3} = {FEA4FF9B-1EC5-486B-981F-2A1975D7C67C}
+		{AD4613ED-8877-4941-9A3C-A9E16593439C} = {A4889150-11B9-400F-A92C-601D102F786D}
+		{3C3629A8-9201-4590-9CEA-9C5CBA44C3CE} = {FEA4FF9B-1EC5-486B-981F-2A1975D7C67C}
+	EndGlobalSection
+EndGlobal

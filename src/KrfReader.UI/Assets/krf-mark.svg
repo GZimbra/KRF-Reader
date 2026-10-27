@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="256" height="256">
+  <!-- KRF Reader: monograma "K" cujo vértice emite ondas RFID. Arte original. -->
+  <rect width="64" height="64" rx="12" fill="#191919"/>
+  <rect x="12" y="12" width="8" height="40" fill="#FFA600"/>
+  <path d="M20 32 L42 10 L52 10 L30 32 Z" fill="#FFA600"/>
+  <path d="M20 32 L42 54 L52 54 L30 32 Z" fill="#FFA600"/>
+  <g fill="none" stroke="#FDCB98" stroke-width="3.2" stroke-linecap="round">
+    <path d="M36.2 27.6 A9 9 0 0 1 36.2 36.4"/>
+    <path d="M42.4 24.2 A16 16 0 0 1 42.4 39.8"/>
+  </g>
+</svg>

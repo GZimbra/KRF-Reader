@@ -7,6 +7,7 @@
         x:Class="KrfReader.UI.Views.MainWindow"
         x:DataType="vm:MainWindowViewModel"
         Title="KRF Reader — Controle de Estoque RFID"
+        Icon="/Assets/krf.ico"
         Width="1280" Height="860" MinWidth="960" MinHeight="640"
         WindowStartupLocation="CenterScreen">
 
@@ -14,41 +15,67 @@
     <Style Selector="Ellipse.led">
       <Setter Property="Width" Value="12" />
       <Setter Property="Height" Value="12" />
-      <Setter Property="Fill" Value="#C0392B" />
+      <Setter Property="Fill" Value="#DE4236" />
     </Style>
     <Style Selector="Ellipse.led.ok">
-      <Setter Property="Fill" Value="#2ECC71" />
+      <Setter Property="Fill" Value="#3DD68C" />
     </Style>
     <Style Selector="TextBlock.status">
-      <Setter Property="Foreground" Value="#F0712C" />
+      <Setter Property="Foreground" Value="{StaticResource SaidaTextBrush}" />
       <Setter Property="FontWeight" Value="Bold" />
     </Style>
     <Style Selector="TextBlock.status.dentro">
-      <Setter Property="Foreground" Value="#2ECC71" />
+      <Setter Property="Foreground" Value="{StaticResource EntradaTextBrush}" />
       <Setter Property="FontWeight" Value="Bold" />
     </Style>
     <Style Selector="TextBlock.error">
-      <Setter Property="Foreground" Value="#FF6B6B" />
-    </Style>
-    <Style Selector="TabItem">
-      <Setter Property="FontSize" Value="20" />
+      <Setter Property="Foreground" Value="{StaticResource SaidaTextBrush}" />
     </Style>
   </Window.Styles>
 
-  <Grid RowDefinitions="*,Auto">
+  <Grid RowDefinitions="Auto,*,Auto">
 
-    <TabControl Grid.Row="0" Padding="12,4,12,8" IsEnabled="{Binding !IsShuttingDown}">
+    <!-- Cabeçalho da marca -->
+    <Border Grid.Row="0" Background="{StaticResource BrandInkBrush}"
+            BorderBrush="{StaticResource HairlineBrush}" BorderThickness="0,0,0,1" Padding="28,14">
+      <Grid ColumnDefinitions="Auto,Auto,*,Auto" ColumnSpacing="14">
+        <Viewbox Grid.Column="0" Width="40" Height="40">
+          <Canvas Width="64" Height="64">
+            <Path Data="{StaticResource KrfMarkBody}" Fill="{StaticResource BrandOrangeBrush}" />
+            <Path Data="{StaticResource KrfMarkWaves}" Stroke="{StaticResource BrandSandBrush}"
+                  StrokeThickness="3.2" StrokeLineCap="Round" />
+          </Canvas>
+        </Viewbox>
+        <StackPanel Grid.Column="1" VerticalAlignment="Center" Spacing="0">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock Text="KRF" FontSize="24" FontWeight="ExtraBold" LetterSpacing="1" />
+            <TextBlock Text="Reader" FontSize="24" FontWeight="Light" LetterSpacing="1" />
+          </StackPanel>
+          <TextBlock Classes="cardLabel" Text="CONTROLE DE ESTOQUE · RFID UHF" />
+        </StackPanel>
+        <Border Grid.Column="3" VerticalAlignment="Center" CornerRadius="2" Padding="12,6"
+                Background="{StaticResource PanelBrush}" BorderBrush="{StaticResource HairlineBrush}" BorderThickness="1">
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <Ellipse Classes="led" Classes.ok="{Binding IsConnected}" VerticalAlignment="Center" Width="10" Height="10" />
+            <TextBlock VerticalAlignment="Center" Classes="muted" Text="{Binding ReaderName}" />
+            <TextBlock VerticalAlignment="Center" FontWeight="SemiBold" Text="{Binding ConnectionText}" />
+          </StackPanel>
+        </Border>
+      </Grid>
+    </Border>
+
+    <TabControl Grid.Row="1" Classes="nav" IsEnabled="{Binding !IsShuttingDown}">
 
       <!-- ═══════════════════════ OPERAÇÃO ═══════════════════════ -->
-      <TabItem Header="Operação">
-        <Grid RowDefinitions="Auto,Auto,Auto,Auto,*" RowSpacing="8">
+      <TabItem Header="OPERAÇÃO">
+        <Grid RowDefinitions="Auto,Auto,Auto,Auto,*" RowSpacing="10">
 
           <!-- Banner do modo -->
           <Border Grid.Row="0" Classes="banner"
                   Classes.entrada="{Binding IsEntradaActive}"
                   Classes.saida="{Binding IsSaidaActive}">
             <StackPanel HorizontalAlignment="Center">
-              <TextBlock Text="{Binding ModeBannerText}" FontSize="64" FontWeight="Black"
+              <TextBlock Text="{Binding ModeBannerText}" FontSize="56" FontWeight="Black" LetterSpacing="4"
                          Foreground="White" HorizontalAlignment="Center" />
               <TextBlock Text="{Binding ModeBannerHint}" FontSize="18" Foreground="White"
                          HorizontalAlignment="Center" Opacity="0.9" />
@@ -70,50 +97,53 @@
 
           <!-- Contadores -->
           <Grid Grid.Row="2" ColumnDefinitions="*,*,*,*">
-            <Border Grid.Column="0" Classes="card">
+            <Border Grid.Column="0" Classes="card kpi" BorderBrush="{StaticResource EntradaTextBrush}">
               <StackPanel>
-                <TextBlock Classes="cardLabel" Text="Tags DENTRO" />
-                <TextBlock Classes="cardValue" Foreground="#2ECC71" Text="{Binding CountDentro, StringFormat={}{0:N0}}" />
+                <TextBlock Classes="cardLabel" Text="TAGS DENTRO" />
+                <TextBlock Classes="cardValue" Foreground="{StaticResource EntradaTextBrush}" Text="{Binding CountDentro, StringFormat={}{0:N0}}" />
               </StackPanel>
             </Border>
-            <Border Grid.Column="1" Classes="card">
+            <Border Grid.Column="1" Classes="card kpi" BorderBrush="{StaticResource SaidaTextBrush}">
               <StackPanel>
-                <TextBlock Classes="cardLabel" Text="Tags FORA" />
-                <TextBlock Classes="cardValue" Foreground="#F0712C" Text="{Binding CountFora, StringFormat={}{0:N0}}" />
+                <TextBlock Classes="cardLabel" Text="TAGS FORA" />
+                <TextBlock Classes="cardValue" Foreground="{StaticResource SaidaTextBrush}" Text="{Binding CountFora, StringFormat={}{0:N0}}" />
               </StackPanel>
             </Border>
-            <Border Grid.Column="2" Classes="card">
+            <Border Grid.Column="2" Classes="card kpi" BorderBrush="{StaticResource BrandOrangeBrush}">
               <StackPanel>
-                <TextBlock Classes="cardLabel" Text="Tags lidas nesta sessão" />
+                <TextBlock Classes="cardLabel" Text="LIDAS NESTA SESSÃO" />
                 <TextBlock Classes="cardValue" Text="{Binding SessionDistinct, StringFormat={}{0:N0}}" />
               </StackPanel>
             </Border>
-            <Border Grid.Column="3" Classes="card">
+            <Border Grid.Column="3" Classes="card kpi" BorderBrush="{StaticResource BrandSandBrush}">
               <StackPanel>
-                <TextBlock Classes="cardLabel" Text="Anomalias (saída sem entrada)" />
-                <TextBlock Classes="cardValue" Foreground="#FF6B6B" Text="{Binding CountAnomalias, StringFormat={}{0:N0}}" />
+                <TextBlock Classes="cardLabel" Text="ANOMALIAS · SAÍDA SEM ENTRADA" />
+                <TextBlock Classes="cardValue" Foreground="{StaticResource BrandSandBrush}" Text="{Binding CountAnomalias, StringFormat={}{0:N0}}" />
               </StackPanel>
             </Border>
           </Grid>
 
-          <TextBlock Grid.Row="3" Classes="muted" FontSize="12" Margin="4,0"
+          <TextBlock Grid.Row="3" Classes="muted" FontSize="12" Margin="6,0"
                      Text="{Binding TechStatsText}" TextWrapping="Wrap" />
 
           <!-- Lista ao vivo -->
           <Border Grid.Row="4" Classes="card" Margin="0" Padding="0">
             <Grid RowDefinitions="Auto,Auto,*">
-              <DockPanel Grid.Row="0" Margin="12,8">
-                <Button DockPanel.Dock="Right" Content="Limpar lista" Command="{Binding ClearLiveReadsCommand}" />
-                <TextBlock VerticalAlignment="Center" FontWeight="SemiBold"
-                           Text="Últimas leituras aplicadas (máx. 200, mais recente no topo)" />
+              <DockPanel Grid.Row="0" Margin="16,10">
+                <Button DockPanel.Dock="Right" Classes="ghost" Content="Limpar lista" Command="{Binding ClearLiveReadsCommand}" />
+                <StackPanel VerticalAlignment="Center" Orientation="Horizontal" Spacing="10">
+                  <TextBlock Classes="sectionTitle" VerticalAlignment="Center" Text="LEITURAS AO VIVO" />
+                  <TextBlock Classes="muted" VerticalAlignment="Center" FontSize="12"
+                             Text="últimas 200 aplicadas, mais recente no topo" />
+                </StackPanel>
               </DockPanel>
               <Grid Grid.Row="1" Margin="12,0,12,4" ColumnDefinitions="110,*,70,80,100,200">
-                <TextBlock Grid.Column="0" Classes="header" Text="Hora" />
+                <TextBlock Grid.Column="0" Classes="header" Text="HORA" />
                 <TextBlock Grid.Column="1" Classes="header" Text="EPC" />
-                <TextBlock Grid.Column="2" Classes="header" Text="Antena" />
+                <TextBlock Grid.Column="2" Classes="header" Text="ANTENA" />
                 <TextBlock Grid.Column="3" Classes="header" Text="RSSI" />
-                <TextBlock Grid.Column="4" Classes="header" Text="Modo" />
-                <TextBlock Grid.Column="5" Classes="header" Text="Resultado" />
+                <TextBlock Grid.Column="4" Classes="header" Text="MODO" />
+                <TextBlock Grid.Column="5" Classes="header" Text="RESULTADO" />
               </Grid>
               <ListBox Grid.Row="2" Classes="compact" ItemsSource="{Binding LiveReads}" Background="Transparent">
                 <ListBox.ItemTemplate>
@@ -137,7 +167,7 @@
       </TabItem>
 
       <!-- ═══════════════════════ CONSULTA ═══════════════════════ -->
-      <TabItem Header="Consulta">
+      <TabItem Header="CONSULTA">
         <Grid RowDefinitions="Auto,Auto,*,Auto,*" RowSpacing="8">
           <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8">
             <TextBlock Text="Status:" VerticalAlignment="Center" />
@@ -157,9 +187,9 @@
             <Grid RowDefinitions="Auto,*">
               <Grid Margin="12,8,12,4" ColumnDefinitions="*,110,200,200">
                 <TextBlock Grid.Column="0" Classes="header" Text="EPC" />
-                <TextBlock Grid.Column="1" Classes="header" Text="Status" />
-                <TextBlock Grid.Column="2" Classes="header" Text="Última leitura" />
-                <TextBlock Grid.Column="3" Classes="header" Text="Última mudança" />
+                <TextBlock Grid.Column="1" Classes="header" Text="STATUS" />
+                <TextBlock Grid.Column="2" Classes="header" Text="ÚLTIMA LEITURA" />
+                <TextBlock Grid.Column="3" Classes="header" Text="ÚLTIMA MUDANÇA" />
               </Grid>
               <ListBox Grid.Row="1" Classes="compact" ItemsSource="{Binding Tags}"
                        SelectedItem="{Binding SelectedTag}" Background="Transparent">
@@ -177,15 +207,15 @@
             </Grid>
           </Border>
 
-          <TextBlock Grid.Row="3" FontWeight="SemiBold" Text="{Binding HistoryTitle}" />
+          <TextBlock Grid.Row="3" FontWeight="SemiBold" Foreground="{StaticResource BrandSandBrush}" Margin="4,6,0,0" Text="{Binding HistoryTitle}" />
 
           <Border Grid.Row="4" Classes="card" Margin="0" Padding="0">
             <Grid RowDefinitions="Auto,*">
               <Grid Margin="12,8,12,4" ColumnDefinitions="200,110,*,70,80">
-                <TextBlock Grid.Column="0" Classes="header" Text="Data/hora" />
-                <TextBlock Grid.Column="1" Classes="header" Text="Modo" />
-                <TextBlock Grid.Column="2" Classes="header" Text="Evento" />
-                <TextBlock Grid.Column="3" Classes="header" Text="Antena" />
+                <TextBlock Grid.Column="0" Classes="header" Text="DATA/HORA" />
+                <TextBlock Grid.Column="1" Classes="header" Text="MODO" />
+                <TextBlock Grid.Column="2" Classes="header" Text="EVENTO" />
+                <TextBlock Grid.Column="3" Classes="header" Text="ANTENA" />
                 <TextBlock Grid.Column="4" Classes="header" Text="RSSI" />
               </Grid>
               <ListBox Grid.Row="1" Classes="compact" ItemsSource="{Binding Events}" Background="Transparent">
@@ -209,14 +239,14 @@
       </TabItem>
 
       <!-- ═══════════════════════ CONFIGURAÇÃO ═══════════════════════ -->
-      <TabItem Header="Configuração">
+      <TabItem Header="CONFIGURAÇÃO">
         <ScrollViewer>
           <StackPanel Spacing="16" MaxWidth="760" HorizontalAlignment="Left">
 
             <!-- Leitor: exige reaplicar -->
-            <Border Classes="card" Padding="16">
+            <Border Classes="card" Padding="20">
               <StackPanel Spacing="10">
-                <TextBlock FontSize="20" FontWeight="SemiBold" Text="Leitor RFID" />
+                <TextBlock Classes="sectionTitle" Text="LEITOR RFID" />
                 <TextBlock Classes="muted" TextWrapping="Wrap"
                            Text="Tipo, conexão, protocolo, potência e antenas só valem após clicar em &quot;Aplicar leitor&quot; (o leitor é desconectado e reconectado). Exige o modo PARADO." />
 
@@ -277,9 +307,9 @@
             </Border>
 
             <!-- Filtro: ao vivo -->
-            <Border Classes="card" Padding="16">
+            <Border Classes="card" Padding="20">
               <StackPanel Spacing="10">
-                <TextBlock FontSize="20" FontWeight="SemiBold" Text="Filtro de leituras (ao vivo)" />
+                <TextBlock Classes="sectionTitle" Text="FILTRO DE LEITURAS · AO VIVO" />
                 <TextBlock Classes="muted" TextWrapping="Wrap"
                            Text="Aplicado imediatamente, sem reconectar o leitor. Leituras com RSSI abaixo do mínimo ou de antenas fora da lista são ignoradas (corta leituras fantasma de tags distantes)." />
 
@@ -306,23 +336,21 @@
     </TabControl>
 
     <!-- Barra de status -->
-    <Border Grid.Row="1" Background="{StaticResource PanelBrush}" Padding="12,6">
-      <Grid ColumnDefinitions="Auto,Auto,Auto,*,Auto" ColumnSpacing="12">
-        <Ellipse Grid.Column="0" Classes="led" Classes.ok="{Binding IsConnected}" VerticalAlignment="Center" />
-        <TextBlock Grid.Column="1" VerticalAlignment="Center" FontWeight="SemiBold" Text="{Binding ReaderName}" />
-        <TextBlock Grid.Column="2" VerticalAlignment="Center" Text="{Binding ConnectionText}" />
-        <TextBlock Grid.Column="3" VerticalAlignment="Center" Classes="muted" Text="{Binding StatusMessage}"
+    <Border Grid.Row="2" Background="{StaticResource BrandInkBrush}" BorderBrush="{StaticResource HairlineBrush}"
+            BorderThickness="0,1,0,0" Padding="28,8">
+      <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12">
+        <TextBlock Grid.Column="0" VerticalAlignment="Center" Classes="muted" Text="{Binding StatusMessage}"
                    TextTrimming="CharacterEllipsis" />
-        <TextBlock Grid.Column="4" VerticalAlignment="Center" Classes="error" MaxWidth="600"
+        <TextBlock Grid.Column="1" VerticalAlignment="Center" Classes="error" MaxWidth="600"
                    TextTrimming="CharacterEllipsis" Text="{Binding LastError}"
                    ToolTip.Tip="{Binding LastError}" />
       </Grid>
     </Border>
 
     <!-- Overlay de encerramento -->
-    <Border Grid.RowSpan="2" Background="#C0000000" IsVisible="{Binding IsShuttingDown}">
+    <Border Grid.RowSpan="3" Background="#D0191919" IsVisible="{Binding IsShuttingDown}">
       <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="12">
-        <TextBlock Text="Encerrando..." FontSize="36" FontWeight="Bold" Foreground="White" HorizontalAlignment="Center" />
+        <TextBlock Text="Encerrando..." FontSize="36" FontWeight="Bold" Foreground="{StaticResource BrandOrangeBrush}" HorizontalAlignment="Center" />
         <TextBlock Text="Gravando leituras pendentes no banco. Aguarde." Foreground="White" HorizontalAlignment="Center" />
         <ProgressBar IsIndeterminate="True" Width="300" />
       </StackPanel>

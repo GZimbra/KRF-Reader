@@ -30,6 +30,7 @@ public sealed class LiveReadItem
         Epc = applied.Read.Epc;
         Antenna = applied.Read.AntennaId;
         Rssi = Display.Rssi(applied.Read.Rssi);
+        RssiValue = applied.Read.Rssi;
         Mode = Display.Mode(applied.Mode);
         IsAnomaly = applied.IsAnomaly;
         Result = applied.Event switch
@@ -45,6 +46,7 @@ public sealed class LiveReadItem
     public string Epc { get; }
     public int Antenna { get; }
     public string Rssi { get; }
+    public double RssiValue { get; }
     public string Mode { get; }
     public string Result { get; }
     public bool IsAnomaly { get; }

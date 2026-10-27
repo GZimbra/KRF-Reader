@@ -139,6 +139,8 @@ Fechar a janela com modo ativo grava as leituras pendentes antes de sair ("Encer
 
 Saída usa vermelho; o laranja do tema é reservado a destaque.
 
+Instrumentos da aba Operação: escala UHF com a faixa do leitor, osciloscópio (ilustrativo, amplitude = taxa de leituras), mostrador de leituras/s brutas e medidor de RSSI com a marca do RSSI mínimo do filtro. Os mesmos dados alimentam o medidor da aba Configurações.
+
 ### Regras de negócio
 
 | Status atual | Modo | Resultado | Evento gravado |

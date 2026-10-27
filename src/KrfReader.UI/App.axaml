@@ -1,38 +1,53 @@
 <Application xmlns="https://github.com/avaloniaui"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:c="using:KrfReader.UI.Controls"
              x:Class="KrfReader.UI.App"
              RequestedThemeVariant="Dark">
   <Application.Resources>
     <!-- Paleta da marca: grafite quase preto + laranja + tons de areia. -->
     <Color x:Key="BrandInk">#191919</Color>
     <Color x:Key="BrandOrange">#FFA600</Color>
+    <Color x:Key="BrandSand">#FDCB98</Color>
     <SolidColorBrush x:Key="BrandInkBrush" Color="#191919" />
     <SolidColorBrush x:Key="BrandOrangeBrush" Color="#FFA600" />
     <SolidColorBrush x:Key="BrandOrangeHoverBrush" Color="#FFB833" />
     <SolidColorBrush x:Key="BrandSandBrush" Color="#FDCB98" />
     <SolidColorBrush x:Key="BrandBrandyBrush" Color="#E2C3A4" />
 
-    <SolidColorBrush x:Key="WindowBrush" Color="#191919" />
-    <SolidColorBrush x:Key="PanelBrush" Color="#222222" />
-    <SolidColorBrush x:Key="PanelRaisedBrush" Color="#2A2A2A" />
-    <SolidColorBrush x:Key="HairlineBrush" Color="#333333" />
+    <!-- Superfícies: janela, painel, tela de instrumento (rebaixada) e linhas. -->
+    <SolidColorBrush x:Key="WindowBrush" Color="#161616" />
+    <SolidColorBrush x:Key="PanelBrush" Color="#1D1D1D" />
+    <SolidColorBrush x:Key="PanelRaisedBrush" Color="#252525" />
+    <SolidColorBrush x:Key="ScreenBrush" Color="#101010" />
+    <SolidColorBrush x:Key="HairlineBrush" Color="#2E2E2E" />
+    <SolidColorBrush x:Key="RowLineBrush" Color="#222222" />
     <SolidColorBrush x:Key="TextBrush" Color="#F4F1EC" />
     <SolidColorBrush x:Key="MutedTextBrush" Color="#A39E97" />
+    <SolidColorBrush x:Key="DimTextBrush" Color="#6F6A63" />
+    <Color x:Key="GridColor">#262626</Color>
+    <Color x:Key="ScaleColor">#7D786F</Color>
 
-    <!-- Cores semânticas: não usam o laranja da marca para não confundir com destaque de UI. -->
+    <!-- Cores semânticas: entrada verde, saída vermelha. Laranja fica para destaque de UI. -->
+    <Color x:Key="EntradaColor">#3DD68C</Color>
+    <Color x:Key="SaidaColor">#FF7A6E</Color>
     <SolidColorBrush x:Key="EntradaBrush" Color="#1F9D5B" />
-    <SolidColorBrush x:Key="EntradaHoverBrush" Color="#25B56A" />
     <SolidColorBrush x:Key="EntradaTextBrush" Color="#3DD68C" />
+    <SolidColorBrush x:Key="EntradaTintBrush" Color="#142A1E" />
     <SolidColorBrush x:Key="SaidaBrush" Color="#C8372D" />
-    <SolidColorBrush x:Key="SaidaHoverBrush" Color="#DE4236" />
     <SolidColorBrush x:Key="SaidaTextBrush" Color="#FF7A6E" />
-    <SolidColorBrush x:Key="ParadoBrush" Color="#2A2A2A" />
-    <SolidColorBrush x:Key="ParadoHoverBrush" Color="#363636" />
-    <SolidColorBrush x:Key="AnomalyBrush" Color="#6E1D18" />
+    <SolidColorBrush x:Key="SaidaTintBrush" Color="#2E1715" />
+    <SolidColorBrush x:Key="AnomalyBrush" Color="#4A1713" />
+    <SolidColorBrush x:Key="SelectedRowBrush" Color="#33291A" />
+
+    <FontFamily x:Key="MonoFont">Cascadia Mono, Consolas, Menlo, DejaVu Sans Mono, monospace</FontFamily>
 
     <!-- Monograma "K" com ondas RFID (mesma geometria de Assets/krf-mark.svg). -->
     <StreamGeometry x:Key="KrfMarkBody">M12,12 L20,12 L20,52 L12,52 Z M20,32 L42,10 L52,10 L30,32 Z M20,32 L42,54 L52,54 L30,32 Z</StreamGeometry>
     <StreamGeometry x:Key="KrfMarkWaves">M36.2,27.6 A9,9 0 0 1 36.2,36.4 M42.4,24.2 A16,16 0 0 1 42.4,39.8</StreamGeometry>
+
+    <!-- Fluent: cantos retos em todos os controles. -->
+    <CornerRadius x:Key="ControlCornerRadius">0</CornerRadius>
+    <CornerRadius x:Key="OverlayCornerRadius">0</CornerRadius>
   </Application.Resources>
 
   <Application.Styles>
@@ -40,15 +55,15 @@
       <FluentTheme.Palettes>
         <ColorPaletteResources x:Key="Dark"
                                Accent="#FFA600"
-                               AltHigh="#191919"
-                               RegionColor="#191919"
+                               AltHigh="#161616"
+                               RegionColor="#161616"
                                BaseHigh="#F4F1EC"
-                               ChromeMediumLow="#222222"
-                               ChromeLow="#191919"
-                               ChromeMedium="#2A2A2A"
+                               ChromeMediumLow="#1D1D1D"
+                               ChromeLow="#161616"
+                               ChromeMedium="#252525"
                                ChromeHigh="#3A3A3A"
-                               ListLow="#262626"
-                               ListMedium="#303030" />
+                               ListLow="#232323"
+                               ListMedium="#2C2C2C" />
       </FluentTheme.Palettes>
     </FluentTheme>
 
@@ -57,39 +72,135 @@
       <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
     </Style>
 
-    <!-- Botão de destaque: laranja com texto escuro (branco sobre laranja não tem contraste). -->
-    <Style Selector="Button.accent">
-      <Setter Property="CornerRadius" Value="2" />
+    <!-- ── Tipografia ── -->
+    <!-- Rótulo de instrumento: mono, caixa alta, espaçado. -->
+    <Style Selector="TextBlock.label">
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="LetterSpacing" Value="2" />
+      <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+    </Style>
+    <Style Selector="TextBlock.label.sand">
+      <Setter Property="Foreground" Value="{StaticResource BrandSandBrush}" />
+    </Style>
+    <Style Selector="TextBlock.mono">
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+    </Style>
+    <Style Selector="TextBlock.readout">
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+      <Setter Property="FontSize" Value="34" />
+      <Setter Property="FontWeight" Value="Bold" />
+    </Style>
+    <Style Selector="TextBlock.sectionTitle">
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="LetterSpacing" Value="2.5" />
+      <Setter Property="Foreground" Value="{StaticResource BrandSandBrush}" />
+    </Style>
+    <Style Selector="TextBlock.panelTitle">
+      <Setter Property="FontSize" Value="18" />
       <Setter Property="FontWeight" Value="SemiBold" />
+    </Style>
+    <Style Selector="TextBlock.muted">
+      <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+    </Style>
+    <Style Selector="TextBlock.dim">
+      <Setter Property="Foreground" Value="{StaticResource DimTextBrush}" />
+    </Style>
+    <Style Selector="TextBlock.header">
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="LetterSpacing" Value="1.5" />
+      <Setter Property="Foreground" Value="{StaticResource DimTextBrush}" />
+    </Style>
+    <Style Selector="TextBlock.error">
+      <Setter Property="Foreground" Value="{StaticResource SaidaTextBrush}" />
+    </Style>
+    <Style Selector="TextBlock.entrada">
+      <Setter Property="Foreground" Value="{StaticResource EntradaTextBrush}" />
+    </Style>
+    <Style Selector="TextBlock.saida">
+      <Setter Property="Foreground" Value="{StaticResource SaidaTextBrush}" />
+    </Style>
+
+    <!-- ── Botões ── -->
+    <Style Selector="Button">
+      <Setter Property="CornerRadius" Value="0" />
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="Padding" Value="14,7" />
+    </Style>
+    <!-- Destaque: laranja com texto escuro (branco sobre laranja não tem contraste). -->
+    <Style Selector="Button.accent">
+      <Setter Property="FontWeight" Value="Bold" />
       <Setter Property="Padding" Value="18,8" />
     </Style>
     <Style Selector="Button.accent /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+      <Setter Property="FontWeight" Value="Bold" />
       <Setter Property="Background" Value="{StaticResource BrandOrangeBrush}" />
       <Setter Property="Foreground" Value="{StaticResource BrandInkBrush}" />
+    </Style>
+    <Style Selector="Button.accent TextBlock">
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+      <Setter Property="FontWeight" Value="Bold" />
     </Style>
     <Style Selector="Button.accent:pointerover /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Background" Value="{StaticResource BrandOrangeHoverBrush}" />
       <Setter Property="Foreground" Value="{StaticResource BrandInkBrush}" />
     </Style>
+    <Style Selector="Button.accent:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#3A3122" />
+      <Setter Property="Foreground" Value="#7D786F" />
+    </Style>
     <Style Selector="Button.ghost">
-      <Setter Property="CornerRadius" Value="2" />
       <Setter Property="Background" Value="Transparent" />
       <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
       <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+    </Style>
+    <Style Selector="Button.ghost:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#22FFA600" />
+      <Setter Property="BorderBrush" Value="{StaticResource BrandOrangeBrush}" />
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
     </Style>
 
-    <!-- Navegação por abas: texto em caixa alta, barra laranja na aba ativa. -->
+    <!-- ── Campos: cantos retos, fundo de tela rebaixada ── -->
+    <Style Selector="TextBox, ComboBox, NumericUpDown">
+      <Setter Property="CornerRadius" Value="0" />
+    </Style>
+    <Style Selector="TextBox">
+      <Setter Property="Background" Value="{StaticResource ScreenBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+    </Style>
+    <Style Selector="TextBox.mono">
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+    </Style>
+    <Style Selector="ComboBox">
+      <Setter Property="Background" Value="{StaticResource ScreenBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+    </Style>
+
+    <!-- ── Navegação: abas numeradas em mono, barra laranja na ativa ── -->
     <Style Selector="TabControl.nav">
-      <Setter Property="Padding" Value="24,16,24,12" />
+      <Setter Property="Padding" Value="24,14,24,12" />
     </Style>
     <Style Selector="TabControl.nav /template/ ItemsPresenter#PART_ItemsPresenter">
       <Setter Property="Margin" Value="16,0" />
     </Style>
     <Style Selector="TabControl.nav > TabItem">
-      <Setter Property="FontSize" Value="14" />
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+      <Setter Property="FontSize" Value="12" />
       <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="MinHeight" Value="44" />
+      <Setter Property="MinHeight" Value="40" />
       <Setter Property="Padding" Value="12,0" />
+      <Setter Property="Foreground" Value="{StaticResource DimTextBrush}" />
+    </Style>
+    <Style Selector="TabControl.nav > TabItem:pointerover /template/ Border#PART_LayoutRoot">
+      <Setter Property="Background" Value="Transparent" />
+    </Style>
+    <Style Selector="TabControl.nav > TabItem:pointerover">
       <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
     </Style>
     <Style Selector="TabControl.nav > TabItem:selected">
@@ -97,152 +208,187 @@
     </Style>
     <Style Selector="TabControl.nav > TabItem:selected /template/ Border#PART_SelectedPipe">
       <Setter Property="Background" Value="{StaticResource BrandOrangeBrush}" />
-      <Setter Property="Height" Value="3" />
+      <Setter Property="Height" Value="2" />
       <Setter Property="CornerRadius" Value="0" />
     </Style>
 
-    <!-- Banner do modo ativo -->
-    <Style Selector="Border.banner">
-      <Setter Property="Background" Value="{StaticResource ParadoBrush}" />
-      <Setter Property="BorderBrush" Value="{StaticResource BrandOrangeBrush}" />
-      <Setter Property="BorderThickness" Value="6,0,0,0" />
-      <Setter Property="CornerRadius" Value="2" />
-      <Setter Property="Padding" Value="24,18" />
-    </Style>
-    <Style Selector="Border.banner.entrada">
-      <Setter Property="Background" Value="{StaticResource EntradaBrush}" />
-      <Setter Property="BorderBrush" Value="{StaticResource EntradaTextBrush}" />
-    </Style>
-    <Style Selector="Border.banner.saida">
-      <Setter Property="Background" Value="{StaticResource SaidaBrush}" />
-      <Setter Property="BorderBrush" Value="{StaticResource SaidaTextBrush}" />
-    </Style>
-
-    <!-- Botões de modo -->
-    <Style Selector="Button.mode">
-      <Setter Property="Height" Value="84" />
-      <Setter Property="HorizontalAlignment" Value="Stretch" />
-      <Setter Property="HorizontalContentAlignment" Value="Center" />
-      <Setter Property="VerticalContentAlignment" Value="Center" />
-      <Setter Property="FontSize" Value="26" />
-      <Setter Property="FontWeight" Value="Bold" />
-      <Setter Property="Foreground" Value="White" />
-      <Setter Property="CornerRadius" Value="2" />
-      <Setter Property="BorderThickness" Value="0,0,0,5" />
-      <Setter Property="BorderBrush" Value="Transparent" />
-      <Setter Property="Opacity" Value="0.6" />
-    </Style>
-    <Style Selector="Button.mode.entrada">
-      <Setter Property="Background" Value="{StaticResource EntradaBrush}" />
-    </Style>
-    <Style Selector="Button.mode.saida">
-      <Setter Property="Background" Value="{StaticResource SaidaBrush}" />
-    </Style>
-    <Style Selector="Button.mode.parar">
-      <Setter Property="Background" Value="{StaticResource ParadoBrush}" />
-    </Style>
-    <Style Selector="Button.mode.active">
-      <Setter Property="Opacity" Value="1" />
-      <Setter Property="BorderBrush" Value="{StaticResource BrandOrangeBrush}" />
-    </Style>
-    <Style Selector="Button.mode.active /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="BorderBrush" Value="{StaticResource BrandOrangeBrush}" />
-    </Style>
-    <Style Selector="Button.mode:disabled">
-      <Setter Property="Opacity" Value="0.3" />
-    </Style>
-    <Style Selector="Button.mode.entrada:disabled /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{StaticResource EntradaBrush}" />
-      <Setter Property="Foreground" Value="White" />
-    </Style>
-    <Style Selector="Button.mode.saida:disabled /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{StaticResource SaidaBrush}" />
-      <Setter Property="Foreground" Value="White" />
-    </Style>
-    <Style Selector="Button.mode.parar:disabled /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{StaticResource ParadoBrush}" />
-      <Setter Property="Foreground" Value="White" />
-    </Style>
-    <Style Selector="Button.mode.entrada:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{StaticResource EntradaHoverBrush}" />
-      <Setter Property="Foreground" Value="White" />
-    </Style>
-    <Style Selector="Button.mode.saida:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{StaticResource SaidaHoverBrush}" />
-      <Setter Property="Foreground" Value="White" />
-    </Style>
-    <Style Selector="Button.mode.parar:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="{StaticResource ParadoHoverBrush}" />
-      <Setter Property="Foreground" Value="White" />
-    </Style>
-
-    <!-- Cartões e painéis -->
+    <!-- ── Painéis ── -->
     <Style Selector="Border.card">
       <Setter Property="Background" Value="{StaticResource PanelBrush}" />
       <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
       <Setter Property="BorderThickness" Value="1" />
-      <Setter Property="CornerRadius" Value="2" />
+      <Setter Property="CornerRadius" Value="0" />
       <Setter Property="Padding" Value="16,12" />
-      <Setter Property="Margin" Value="4" />
     </Style>
-    <Style Selector="Border.kpi">
-      <Setter Property="BorderThickness" Value="0,3,0,0" />
-    </Style>
-    <Style Selector="TextBlock.cardValue">
-      <Setter Property="FontSize" Value="40" />
-      <Setter Property="FontWeight" Value="Bold" />
-    </Style>
-    <Style Selector="TextBlock.cardLabel">
-      <Setter Property="FontSize" Value="11" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="LetterSpacing" Value="1.2" />
-      <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
-    </Style>
-    <Style Selector="TextBlock.sectionTitle">
-      <Setter Property="FontSize" Value="13" />
-      <Setter Property="FontWeight" Value="Bold" />
-      <Setter Property="LetterSpacing" Value="1.5" />
-      <Setter Property="Foreground" Value="{StaticResource BrandSandBrush}" />
-    </Style>
-    <Style Selector="TextBlock.panelTitle">
-      <Setter Property="FontSize" Value="20" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-    </Style>
-    <Style Selector="TextBlock.muted">
-      <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
-    </Style>
-    <Style Selector="TextBlock.header">
-      <Setter Property="FontSize" Value="11" />
-      <Setter Property="FontWeight" Value="SemiBold" />
-      <Setter Property="LetterSpacing" Value="1" />
-      <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+    <!-- Tela de instrumento: rebaixada, mais escura que o painel. -->
+    <Style Selector="Border.screen">
+      <Setter Property="Background" Value="{StaticResource ScreenBrush}" />
+      <Setter Property="BorderBrush" Value="#262626" />
+      <Setter Property="BorderThickness" Value="1" />
     </Style>
     <Style Selector="Border.tableHeader">
+      <Setter Property="Background" Value="#181818" />
       <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
       <Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="Padding" Value="12,7" />
+    </Style>
+    <Style Selector="c|HudBorder">
+      <Setter Property="CornerBrush" Value="#4A4A4A" />
+    </Style>
+    <Style Selector="c|HudBorder.entrada">
+      <Setter Property="CornerBrush" Value="{StaticResource EntradaTextBrush}" />
+    </Style>
+    <Style Selector="c|HudBorder.saida">
+      <Setter Property="CornerBrush" Value="{StaticResource SaidaTextBrush}" />
     </Style>
 
-    <!-- Linhas de lista -->
+    <!-- Selo de estado (ex.: VALIDADO, DENTRO/FORA). -->
+    <Style Selector="Border.tag">
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Padding" Value="6,1" />
+      <Setter Property="BorderBrush" Value="{StaticResource SaidaTextBrush}" />
+      <Setter Property="HorizontalAlignment" Value="Left" />
+      <Setter Property="VerticalAlignment" Value="Center" />
+    </Style>
+    <Style Selector="Border.tag TextBlock">
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+      <Setter Property="FontSize" Value="10" />
+      <Setter Property="FontWeight" Value="Bold" />
+      <Setter Property="LetterSpacing" Value="1.5" />
+      <Setter Property="Foreground" Value="{StaticResource SaidaTextBrush}" />
+    </Style>
+    <Style Selector="Border.tag.ok">
+      <Setter Property="BorderBrush" Value="{StaticResource EntradaTextBrush}" />
+    </Style>
+    <Style Selector="Border.tag.ok TextBlock">
+      <Setter Property="Foreground" Value="{StaticResource EntradaTextBrush}" />
+    </Style>
+
+    <!-- LED de estado -->
+    <Style Selector="Ellipse.led">
+      <Setter Property="Width" Value="8" />
+      <Setter Property="Height" Value="8" />
+      <Setter Property="Fill" Value="{StaticResource SaidaTextBrush}" />
+    </Style>
+    <Style Selector="Ellipse.led.ok">
+      <Setter Property="Fill" Value="{StaticResource EntradaTextBrush}" />
+    </Style>
+
+    <!-- ── Teclas de modo: tecla de painel com LED no topo ── -->
+    <Style Selector="Button.key">
+      <Setter Property="Height" Value="70" />
+      <Setter Property="HorizontalAlignment" Value="Stretch" />
+      <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+      <Setter Property="VerticalContentAlignment" Value="Stretch" />
+      <Setter Property="Padding" Value="0" />
+      <Setter Property="Background" Value="{StaticResource PanelRaisedBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
+      <Setter Property="BorderThickness" Value="1" />
+      <Setter Property="Foreground" Value="{StaticResource MutedTextBrush}" />
+    </Style>
+    <Style Selector="Button.key:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#2D2D2D" />
+      <Setter Property="BorderBrush" Value="#4A4A4A" />
+      <Setter Property="Foreground" Value="{StaticResource TextBrush}" />
+    </Style>
+    <Style Selector="Button.key:pressed">
+      <Setter Property="RenderTransform" Value="translateY(1px)" />
+    </Style>
+    <Style Selector="Button.key:disabled /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#1C1C1C" />
+      <Setter Property="Foreground" Value="#4F4B46" />
+    </Style>
+    <Style Selector="Button.key Border.keyLed">
+      <Setter Property="Height" Value="3" />
+      <Setter Property="Background" Value="#333333" />
+    </Style>
+    <Style Selector="Button.key.entrada.active">
+      <Setter Property="Background" Value="{StaticResource EntradaTintBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource EntradaBrush}" />
+      <Setter Property="Foreground" Value="{StaticResource EntradaTextBrush}" />
+    </Style>
+    <Style Selector="Button.key.entrada.active Border.keyLed">
+      <Setter Property="Background" Value="{StaticResource EntradaTextBrush}" />
+      <Setter Property="BoxShadow" Value="0 0 10 1 #803DD68C" />
+    </Style>
+    <Style Selector="Button.key.saida.active">
+      <Setter Property="Background" Value="{StaticResource SaidaTintBrush}" />
+      <Setter Property="BorderBrush" Value="{StaticResource SaidaBrush}" />
+      <Setter Property="Foreground" Value="{StaticResource SaidaTextBrush}" />
+    </Style>
+    <Style Selector="Button.key.saida.active Border.keyLed">
+      <Setter Property="Background" Value="{StaticResource SaidaTextBrush}" />
+      <Setter Property="BoxShadow" Value="0 0 10 1 #80FF7A6E" />
+    </Style>
+    <Style Selector="Button.key.parar.active">
+      <Setter Property="BorderBrush" Value="#5A4A2A" />
+      <Setter Property="Foreground" Value="{StaticResource BrandSandBrush}" />
+    </Style>
+    <Style Selector="Button.key.parar.active Border.keyLed">
+      <Setter Property="Background" Value="{StaticResource BrandOrangeBrush}" />
+      <Setter Property="BoxShadow" Value="0 0 10 1 #80FFA600" />
+    </Style>
+    <Style Selector="Button.key.active:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Foreground" Value="{Binding $parent[Button].Foreground}" />
+    </Style>
+    <Style Selector="Button.key.entrada.active:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#183322" />
+    </Style>
+    <Style Selector="Button.key.saida.active:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#381B18" />
+    </Style>
+
+    <!-- ── Instrumentos ── -->
+    <Style Selector="c|Oscilloscope">
+      <Setter Property="TraceColor" Value="{StaticResource BrandSand}" />
+      <Setter Property="GridColor" Value="{StaticResource GridColor}" />
+    </Style>
+    <Style Selector="c|Oscilloscope.entrada">
+      <Setter Property="TraceColor" Value="{StaticResource EntradaColor}" />
+    </Style>
+    <Style Selector="c|Oscilloscope.saida">
+      <Setter Property="TraceColor" Value="{StaticResource SaidaColor}" />
+    </Style>
+    <Style Selector="c|SignalMeter">
+      <Setter Property="ScaleColor" Value="{StaticResource ScaleColor}" />
+    </Style>
+    <Style Selector="c|FrequencyScale">
+      <Setter Property="ScaleColor" Value="{StaticResource ScaleColor}" />
+    </Style>
+
+    <!-- ── Listas ── -->
     <Style Selector="Border.row">
-      <Setter Property="BorderBrush" Value="#262626" />
+      <Setter Property="BorderBrush" Value="{StaticResource RowLineBrush}" />
       <Setter Property="BorderThickness" Value="0,0,0,1" />
+      <Setter Property="Padding" Value="12,4" />
+    </Style>
+    <Style Selector="Border.row TextBlock">
+      <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
+      <Setter Property="FontSize" Value="12" />
+      <Setter Property="VerticalAlignment" Value="Center" />
     </Style>
     <Style Selector="Border.row.anomaly">
       <Setter Property="Background" Value="{StaticResource AnomalyBrush}" />
     </Style>
     <Style Selector="Border.row.anomaly TextBlock">
-      <Setter Property="Foreground" Value="White" />
+      <Setter Property="Foreground" Value="#FFD9D4" />
       <Setter Property="FontWeight" Value="Bold" />
+    </Style>
+    <Style Selector="ListBox.compact">
+      <Setter Property="Background" Value="Transparent" />
     </Style>
     <Style Selector="ListBox.compact ListBoxItem">
       <Setter Property="Padding" Value="0" />
       <Setter Property="MinHeight" Value="0" />
     </Style>
+    <Style Selector="ListBox.compact ListBoxItem:pointerover /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#1FFFFFFF" />
+    </Style>
     <Style Selector="ListBox.compact ListBoxItem:selected /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="#3A2E17" />
+      <Setter Property="Background" Value="{StaticResource SelectedRowBrush}" />
     </Style>
     <Style Selector="ListBox.compact ListBoxItem:selected:pointerover /template/ ContentPresenter#PART_ContentPresenter">
-      <Setter Property="Background" Value="#46371A" />
+      <Setter Property="Background" Value="#3E321D" />
     </Style>
   </Application.Styles>
 </Application>

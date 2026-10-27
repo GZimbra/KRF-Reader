@@ -100,16 +100,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     public string ModeBannerText => ActiveMode switch
     {
-        OperationMode.Entrada => "MODO ENTRADA",
-        OperationMode.Saida => "MODO SAÍDA",
+        OperationMode.Entrada => "ENTRADA",
+        OperationMode.Saida => "SAÍDA",
         _ => "PARADO",
     };
 
     public string ModeBannerHint => ActiveMode switch
     {
-        OperationMode.Entrada => "Tags lidas agora são marcadas como DENTRO do estoque",
-        OperationMode.Saida => "Tags lidas agora são marcadas como FORA do estoque",
-        _ => "Nenhuma leitura está sendo aplicada ao estoque",
+        OperationMode.Entrada => "Tag lida → DENTRO do estoque",
+        OperationMode.Saida => "Tag lida → FORA do estoque",
+        _ => "Leituras não alteram o estoque",
     };
 
     public bool IsEntradaActive => ActiveMode == OperationMode.Entrada;
@@ -336,7 +336,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ModelPowerMin), nameof(ModelPowerMax), nameof(ModelPowerHint),
-        nameof(ModelValidationText), nameof(IsModelValidated), nameof(ModelSpecs), nameof(IsCustomModel))]
+        nameof(ModelValidationText), nameof(IsModelValidated), nameof(ModelSpecs), nameof(IsCustomModel),
+        nameof(BandMinimum), nameof(BandMaximum))]
     private ReaderModel _selectedReaderModel;
 
     public bool IsCustomModel => SelectedReaderModel.IsCustom;
@@ -745,6 +746,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         catch (Exception ex) { ReportError($"Erro ao liberar o leitor: {ex.Message}"); }
 
         _current = null;
+        ResetSignal();
         ActiveMode = null;
         IsConnected = false;
         ConnectionText = "Desconectado";
@@ -798,6 +800,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         handle.Pipeline.BatchPersisted += OnBatchPersisted;
         handle.Pipeline.ModeChanged += OnModeChanged;
         handle.Pipeline.Error += OnPipelineError;
+        handle.Reader.TagRead += OnReaderTagRead;
     }
 
     private void Detach(PipelineHandle handle)
@@ -805,6 +808,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         handle.Pipeline.BatchPersisted -= OnBatchPersisted;
         handle.Pipeline.ModeChanged -= OnModeChanged;
         handle.Pipeline.Error -= OnPipelineError;
+        handle.Reader.TagRead -= OnReaderTagRead;
     }
 
     private void OnBatchPersisted(object? sender, BatchResult batch)
@@ -852,6 +856,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                     $"descartadas {s.StaleDiscarded:N0} · persistidas {s.Persisted:N0} · drops de fila {s.QueueDropped:N0}";
 
                 var connected = handle.Reader.IsConnected;
+                UpdateSignal(connected && handle.Reader.IsInventoryRunning);
                 IsConnected = connected;
                 ConnectionText = connected
                     ? (handle.Reader.IsInventoryRunning ? "Conectado · lendo" : "Conectado")

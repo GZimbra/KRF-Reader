@@ -9,10 +9,10 @@ public class ReaderModelCatalogTests
     private static readonly ReaderModelCatalog Catalog = ReaderModelCatalog.Default;
 
     [Fact]
-    public void Todo_modelo_nao_simulado_usa_protocolo_registrado()
+    public void Todo_modelo_usa_protocolo_registrado()
     {
         var factory = new ReaderProtocolFactory();
-        foreach (var m in Catalog.Models.Where(m => m.Type != ReaderType.Mock))
+        foreach (var m in Catalog.Models)
             Assert.Contains(m.Protocol, factory.AvailableProtocols, StringComparer.OrdinalIgnoreCase);
     }
 
@@ -37,14 +37,14 @@ public class ReaderModelCatalogTests
     [Fact]
     public void Resolve_usa_Model_quando_existe()
     {
-        var m = Catalog.Resolve(new ReaderOptions { Model = ReaderModelCatalog.R2000TcpId, Type = ReaderType.Mock });
+        var m = Catalog.Resolve(new ReaderOptions { Model = ReaderModelCatalog.R2000TcpId, Type = ReaderType.Serial });
         Assert.Equal(ReaderModelCatalog.R2000TcpId, m.Id);
     }
 
     [Theory]
     [InlineData(ReaderType.Serial, "R200", ReaderModelCatalog.R200Id)]
     [InlineData(ReaderType.Tcp, "r2000", ReaderModelCatalog.R2000TcpId)]
-    [InlineData(ReaderType.Mock, "AsciiLine", ReaderModelCatalog.MockId)]
+    [InlineData(ReaderType.Serial, "AsciiLine", ReaderModelCatalog.AsciiSerialId)]
     [InlineData(ReaderType.Tcp, "Desconhecido", ReaderModelCatalog.CustomId)]
     public void Resolve_deduz_por_tipo_e_protocolo(ReaderType type, string protocol, string expected)
     {
@@ -54,7 +54,7 @@ public class ReaderModelCatalogTests
     [Fact]
     public void Ids_duplicados_sao_rejeitados()
     {
-        var a = new ReaderModel { Id = "x", DisplayName = "x", Family = "x", Type = ReaderType.Mock, IsCustom = true };
+        var a = new ReaderModel { Id = "x", DisplayName = "x", Family = "x", Type = ReaderType.Serial, IsCustom = true };
         Assert.Throws<ArgumentException>(() => new ReaderModelCatalog([a, a with { DisplayName = "y" }]));
     }
 }

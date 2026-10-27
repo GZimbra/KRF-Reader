@@ -33,7 +33,6 @@ public sealed class RfidReaderFactory(IReaderProtocolFactory protocols, ILoggerF
 
         return options.Type switch
         {
-            ReaderType.Mock => new MockReader(options),
             ReaderType.Serial => new GenericSerialReader(
                 options, _protocols.Create(options.Protocol), loggerFactory?.CreateLogger<GenericSerialReader>()),
             ReaderType.Tcp => new GenericTcpReader(

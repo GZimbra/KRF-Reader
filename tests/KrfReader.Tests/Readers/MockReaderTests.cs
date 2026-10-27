@@ -1,31 +1,28 @@
 using KrfReader.Application.Configuration;
 using KrfReader.Application.Readers;
 using KrfReader.Domain;
-using KrfReader.Infrastructure.Readers;
+using KrfReader.Tests.Fakes;
 
 namespace KrfReader.Tests.Readers;
 
 public sealed class MockReaderTests : IAsyncLifetime
 {
-    private readonly ReaderOptions _options = new()
+    private readonly ReaderOptions _options = new() { Antennas = [1, 3] };
+
+    private readonly MockReaderOptions _mock = new()
     {
-        Type = ReaderType.Mock,
-        Antennas = [1, 3],
-        Mock = new MockReaderOptions
-        {
-            Seed = 1234,
-            TagPopulation = 30,
-            ReadsPerSecond = 500,
-            TagsInFieldAtOnce = 5,
-            FieldChurnMs = 200,
-        },
+        Seed = 1234,
+        TagPopulation = 30,
+        ReadsPerSecond = 500,
+        TagsInFieldAtOnce = 5,
+        FieldChurnMs = 200,
     };
 
     private MockReader _reader = null!;
 
     public Task InitializeAsync()
     {
-        _reader = new MockReader(_options);
+        _reader = new MockReader(_options, _mock);
         return Task.CompletedTask;
     }
 
@@ -64,11 +61,11 @@ public sealed class MockReaderTests : IAsyncLifetime
         {
             Assert.Equal(r.Epc, Epc.Normalize(r.Epc));
             Assert.Contains(r.AntennaId, _options.Antennas);
-            Assert.InRange(r.Rssi, _options.Mock.MinRssi - 0.5, _options.Mock.MaxRssi + 0.5);
+            Assert.InRange(r.Rssi, _mock.MinRssi - 0.5, _mock.MaxRssi + 0.5);
             Assert.Equal(DateTimeKind.Utc, r.TimestampUtc.Kind);
-            Assert.StartsWith(_options.Mock.EpcPrefix, r.Epc);
+            Assert.StartsWith(_mock.EpcPrefix, r.Epc);
         });
-        Assert.True(snapshot.Select(r => r.Epc).Distinct().Count() <= _options.Mock.TagPopulation);
+        Assert.True(snapshot.Select(r => r.Epc).Distinct().Count() <= _mock.TagPopulation);
     }
 
     [Fact]

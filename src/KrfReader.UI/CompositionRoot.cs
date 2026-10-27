@@ -70,6 +70,23 @@ public sealed class CompositionRoot : IDisposable
             .AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: false)
             .Build();
 
+        // appsettings.Local.json de versões anteriores pode ter Reader:Type = "Mock" (simulador removido):
+        // nesse caso o leitor volta ao padrão (R200 serial) em vez de falhar no Bind.
+        var typeKey = $"{ReaderOptions.SectionName}:{nameof(ReaderOptions.Type)}";
+        if (configuration[typeKey] is { } typeText && !Enum.TryParse<ReaderType>(typeText, ignoreCase: true, out _))
+        {
+            var defaults = new ReaderOptions();
+            configuration = new ConfigurationBuilder()
+                .AddConfiguration(configuration)
+                .AddInMemoryCollection(new Dictionary<string, string?>
+                {
+                    [typeKey] = defaults.Type.ToString(),
+                    [$"{ReaderOptions.SectionName}:{nameof(ReaderOptions.Model)}"] = defaults.Model,
+                    [$"{ReaderOptions.SectionName}:{nameof(ReaderOptions.Protocol)}"] = defaults.Protocol,
+                })
+                .Build();
+        }
+
         var reader = new ReaderOptions();
         configuration.GetSection(ReaderOptions.SectionName).Bind(reader);
         var pipeline = new PipelineOptions();

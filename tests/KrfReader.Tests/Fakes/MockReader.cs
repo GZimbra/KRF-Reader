@@ -3,10 +3,10 @@ using KrfReader.Application.Configuration;
 using KrfReader.Application.Readers;
 using KrfReader.Domain;
 
-namespace KrfReader.Infrastructure.Readers;
+namespace KrfReader.Tests.Fakes;
 
 /// <summary>
-/// Simulador de leitor UHF para rodar ponta a ponta sem hardware.
+/// Simulador de leitor UHF para os testes de ponta a ponta. Só existe no projeto de testes: não entra no executável.
 /// <para>
 /// Mantém uma população de EPCs e um "campo" com algumas tags presentes ao mesmo tempo, que entram e saem
 /// periodicamente. Gera ~<see cref="MockReaderOptions.ReadsPerSecond"/> leituras/s em micro-lotes (~20 ms),
@@ -25,7 +25,6 @@ public sealed class MockReader : IRfidReader
 
     [ThreadStatic] private static MockReader? t_raisingReader;
 
-    private readonly ReaderOptions _options;
     private readonly MockReaderOptions _mock;
     private readonly TimeProvider _time;
     private readonly Random _random;
@@ -42,11 +41,10 @@ public sealed class MockReader : IRfidReader
     private volatile bool _connected;
     private volatile bool _running;
 
-    public MockReader(ReaderOptions options, TimeProvider? timeProvider = null)
+    public MockReader(ReaderOptions options, MockReaderOptions mock, TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(options);
-        _options = options;
-        _mock = options.Mock ?? new MockReaderOptions();
+        _mock = mock ?? throw new ArgumentNullException(nameof(mock));
         _time = timeProvider ?? TimeProvider.System;
         _random = _mock.Seed is { } seed ? new Random(seed) : new Random();
         _antennas = options.Antennas is { Length: > 0 } a ? a.Distinct().ToArray() : [1];
@@ -323,4 +321,26 @@ public sealed class MockReader : IRfidReader
             // Handler de erro com falha não pode derrubar o leitor.
         }
     }
+}
+
+public sealed class MockReaderOptions
+{
+    /// <summary>Quantidade de EPCs distintos simulados.</summary>
+    public int TagPopulation { get; set; } = 50;
+
+    /// <summary>Taxa total de leituras/s (simula releitura em rajada do UHF).</summary>
+    public int ReadsPerSecond { get; set; } = 200;
+
+    /// <summary>Quantas tags estão "no campo" simultaneamente (as demais entram/saem com o tempo).</summary>
+    public int TagsInFieldAtOnce { get; set; } = 8;
+
+    /// <summary>Intervalo médio (ms) para trocar uma tag do campo por outra da população.</summary>
+    public int FieldChurnMs { get; set; } = 1500;
+
+    public double MinRssi { get; set; } = -85;
+    public double MaxRssi { get; set; } = -35;
+    public string EpcPrefix { get; set; } = "E28011606000";
+
+    /// <summary>Seed fixa para reprodutibilidade; null = aleatória.</summary>
+    public int? Seed { get; set; }
 }

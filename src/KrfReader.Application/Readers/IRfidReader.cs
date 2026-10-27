@@ -15,7 +15,7 @@ namespace KrfReader.Application.Readers;
 /// </summary>
 public interface IRfidReader : IAsyncDisposable
 {
-    /// <summary>Nome legível (ex.: "Mock", "Serial COM3", "TCP 192.168.1.100:4001").</summary>
+    /// <summary>Nome legível (ex.: "Serial COM3", "TCP 192.168.1.100:4001").</summary>
     string Name { get; }
 
     bool IsConnected { get; }

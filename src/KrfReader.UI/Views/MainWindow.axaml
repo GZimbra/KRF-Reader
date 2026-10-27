@@ -110,7 +110,7 @@
           </StackPanel>
           <c:FrequencyScale Grid.Column="1" Height="30" IsLive="{Binding IsReading}"
                             BandMinimum="{Binding BandMinimum}" BandMaximum="{Binding BandMaximum}"
-                            ToolTip.Tip="Banda UHF. Faixa destacada = configurada no leitor. O cursor indica salto de canal (ilustrativo)." />
+                            ToolTip.Tip="Banda UHF. Faixa destacada = configurada no leitor. Acende com o inventário rodando." />
         </Grid>
 
         <!-- Link com o leitor -->
@@ -150,7 +150,7 @@
                         Classes.entrada="{Binding IsEntradaActive}" Classes.saida="{Binding IsSaidaActive}" />
                 <Grid Grid.Column="1" RowDefinitions="Auto,Auto,*" Margin="18,12,18,14" RowSpacing="6">
                   <DockPanel Grid.Row="0">
-                    <TextBlock DockPanel.Dock="Right" Classes="label" Text="SINAL · ILUSTRATIVO" />
+                    <TextBlock DockPanel.Dock="Right" Classes="label" Text="LEITURAS/S · ÚLTIMOS 12 s" />
                     <TextBlock Classes="label sand" Text="MODO" />
                   </DockPanel>
                   <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="18">
@@ -555,7 +555,7 @@
                               ItemsSource="{Binding ReaderTypes}" SelectedIndex="{Binding ReaderTypeIndex}" />
                   </Grid>
 
-                  <Grid ColumnDefinitions="150,*" IsVisible="{Binding IsProtocolRelevant}">
+                  <Grid ColumnDefinitions="150,*">
                     <TextBlock Classes="field" Text="PROTOCOLO" />
                     <ComboBox Grid.Column="1" Width="260"
                               ItemsSource="{Binding Protocols}" SelectedItem="{Binding SelectedProtocol}" />

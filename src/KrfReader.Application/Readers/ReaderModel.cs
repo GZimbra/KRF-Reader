@@ -18,7 +18,7 @@ public sealed record ReaderModel
 
     public required ReaderType Type { get; init; }
 
-    /// <summary>Nome registrado em <see cref="IReaderProtocolFactory"/>. Ignorado para <see cref="ReaderType.Mock"/>.</summary>
+    /// <summary>Nome registrado em <see cref="IReaderProtocolFactory"/>.</summary>
     public string Protocol { get; init; } = "";
 
     public int DefaultBaudRate { get; init; } = 115200;

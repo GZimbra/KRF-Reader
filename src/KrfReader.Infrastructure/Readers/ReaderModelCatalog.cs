@@ -20,7 +20,6 @@ public sealed class ReaderModelCatalog : IReaderModelCatalog
     public const string R2000TcpId = "r2000-tcp";
     public const string AsciiSerialId = "ascii-serial";
     public const string AsciiTcpId = "ascii-tcp";
-    public const string MockId = "mock";
     public const string CustomId = "custom";
 
     public static ReaderModelCatalog Default { get; } = new(BuiltIn());
@@ -47,10 +46,8 @@ public sealed class ReaderModelCatalog : IReaderModelCatalog
         if (Find(options.Model) is { } byId)
             return byId;
 
-        var match = options.Type == ReaderType.Mock
-            ? Models.FirstOrDefault(m => m.Type == ReaderType.Mock && !m.IsCustom)
-            : Models.FirstOrDefault(m => !m.IsCustom && m.Type == options.Type
-                && string.Equals(m.Protocol, options.Protocol, StringComparison.OrdinalIgnoreCase));
+        var match = Models.FirstOrDefault(m => !m.IsCustom && m.Type == options.Type
+            && string.Equals(m.Protocol, options.Protocol, StringComparison.OrdinalIgnoreCase));
         return match ?? Models.First(m => m.IsCustom);
     }
 
@@ -146,7 +143,7 @@ public sealed class ReaderModelCatalog : IReaderModelCatalog
         {
             Id = AsciiTcpId,
             DisplayName = "Genérico texto · TCP/IP",
-            Family = "Gateways de rede ou simuladores (netcat)",
+            Family = "Gateways de rede que enviam uma linha por leitura",
             Type = ReaderType.Tcp,
             Protocol = AsciiLineProtocol.ProtocolName,
             DefaultTcpPort = 4001,
@@ -155,18 +152,6 @@ public sealed class ReaderModelCatalog : IReaderModelCatalog
             Interface = "Ethernet, cliente TCP, texto ASCII",
             FrameFormat = "EPC,RSSI,ANTENA[,TIMESTAMP]\\n · comandos START/STOP/POWER/ANT",
             Notes = "Teste rápido: nc -l 4001 e digite linhas no formato acima.",
-        };
-        yield return new ReaderModel
-        {
-            Id = MockId,
-            DisplayName = "Simulador (sem hardware)",
-            Family = "Leitor simulado do KRF Reader",
-            Type = ReaderType.Mock,
-            DefaultPowerDbm = 30,
-            AntennaPorts = 2,
-            Interface = "Nenhuma",
-            Notes = "Gera leituras aleatórias (inclusive fantasmas de RSSI baixo) para treinar e testar sem leitor.",
-            Validated = true,
         };
         yield return new ReaderModel
         {

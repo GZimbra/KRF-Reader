@@ -1,8 +1,7 @@
-namespace KrfReader.Application.Configuration;
+﻿namespace KrfReader.Application.Configuration;
 
 public enum ReaderType
 {
-    Mock,
     Serial,
     Tcp,
 }
@@ -15,19 +14,17 @@ public sealed class ReaderOptions
     /// <summary>Id do perfil em <see cref="Readers.IReaderModelCatalog"/> (informativo; vazio = deduzido de Type/Protocol).</summary>
     public string Model { get; set; } = "";
 
-    public ReaderType Type { get; set; } = ReaderType.Mock;
+    public ReaderType Type { get; set; } = ReaderType.Serial;
 
     /// <summary>Nome do protocolo registrado em <see cref="Readers.IReaderProtocolFactory"/> (Serial/Tcp).</summary>
-    public string Protocol { get; set; } = "AsciiLine";
+    public string Protocol { get; set; } = "R200";
 
     public SerialReaderOptions Serial { get; set; } = new();
 
     public TcpReaderOptions Tcp { get; set; } = new();
 
-    public MockReaderOptions Mock { get; set; } = new();
-
     /// <summary>Potência de transmissão em dBm (UHF típico: 0–33 dBm). Controla o alcance.</summary>
-    public double PowerDbm { get; set; } = 30;
+    public double PowerDbm { get; set; } = 20;
 
     /// <summary>Antenas ativas no leitor (portas físicas).</summary>
     public int[] Antennas { get; set; } = [1];
@@ -52,26 +49,4 @@ public sealed class TcpReaderOptions
     public string Host { get; set; } = "192.168.1.100";
     public int Port { get; set; } = 4001;
     public int ConnectTimeoutMs { get; set; } = 5000;
-}
-
-public sealed class MockReaderOptions
-{
-    /// <summary>Quantidade de EPCs distintos simulados.</summary>
-    public int TagPopulation { get; set; } = 50;
-
-    /// <summary>Taxa total de leituras/s (simula releitura em rajada do UHF).</summary>
-    public int ReadsPerSecond { get; set; } = 200;
-
-    /// <summary>Quantas tags estão "no campo" simultaneamente (as demais entram/saem com o tempo).</summary>
-    public int TagsInFieldAtOnce { get; set; } = 8;
-
-    /// <summary>Intervalo médio (ms) para trocar uma tag do campo por outra da população.</summary>
-    public int FieldChurnMs { get; set; } = 1500;
-
-    public double MinRssi { get; set; } = -85;
-    public double MaxRssi { get; set; } = -35;
-    public string EpcPrefix { get; set; } = "E28011606000";
-
-    /// <summary>Seed fixa para reprodutibilidade em testes; null = aleatória.</summary>
-    public int? Seed { get; set; }
 }

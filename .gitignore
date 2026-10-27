@@ -9,3 +9,4 @@ obj/
 TestResults/
 .claude/
 appsettings.Local.json
+publish/

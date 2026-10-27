@@ -9,15 +9,17 @@
     <img src="https://img.shields.io/badge/.NET-8.0-512BD4?style=flat-square&amp;logo=dotnet&amp;logoColor=white" alt=".NET 8" />
     <img src="https://img.shields.io/badge/UI-Avalonia%2011.3-FFA600?style=flat-square" alt="Avalonia 11.3" />
     <img src="https://img.shields.io/badge/Banco-SQLite%20%2B%20Dapper-003B57?style=flat-square&amp;logo=sqlite&amp;logoColor=white" alt="SQLite com Dapper" />
-    <img src="https://img.shields.io/badge/Leitor-Mock%20%7C%20Serial%20%7C%20TCP-191919?style=flat-square" alt="Leitor Mock, Serial ou TCP" />
+    <img src="https://img.shields.io/badge/Leitor-R200%20%7C%20Serial%20%7C%20TCP-191919?style=flat-square" alt="Leitor R200, Serial ou TCP" />
     <img src="https://img.shields.io/badge/Plataformas-Windows%20%7C%20Linux%20%7C%20macOS-555555?style=flat-square" alt="Windows, Linux e macOS" />
-    <img src="https://img.shields.io/badge/Testes-168%20casos%20xUnit-2E7D32?style=flat-square" alt="168 casos de teste xUnit" />
+    <img src="https://img.shields.io/badge/Testes-199%20casos%20xUnit-2E7D32?style=flat-square" alt="199 casos de teste xUnit" />
   </p>
 </div>
 
 > [!WARNING]
-> O código foi validado com 168 casos de teste automatizados e com o **MockReader** (simulador). **Não foi exercitado
-> contra um leitor UHF físico**: o modelo do leitor ainda não está definido e só o protocolo `AsciiLine` vem pronto.
+> O app não tem modo simulado: ele sobe conectando no leitor **R200** (COM3, 115200, 915–928 MHz). Com o R200 real
+> foram validados identificação, potência, região/canais, início e parada do inventário. **A leitura de tags com
+> hardware real nunca foi validada**: o leitor foi testado sem antena. O pipeline foi coberto por 199 testes
+> automatizados, que usam um simulador que só existe no projeto de testes.
 > UHF lê fora da zona de interesse; o software mitiga leituras fantasma, mas não resolve. Leia
 > [Limitações físicas do UHF](#limitações-físicas-do-uhf) antes de instalar.
 
@@ -62,7 +64,7 @@ telemetria: o app fala só com o leitor (serial ou TCP) e com o SQLite local.
 | Interface | `KrfReader.UI` | Avalonia 11 (MVVM): abas Operação, Consulta, Cadastro e Configuração. Composition root e `appsettings.json`. |
 | Domínio | `KrfReader.Domain` | Regra pura (`InventoryRules.Decide`, `TagRegistrationRules`), enums, `TagRead`, `Epc`. Sem dependências. |
 | Aplicação | `KrfReader.Application` | Contratos (`IRfidReader`, `IReaderProtocol`, `IInventoryRepository`, `ITagCatalogRepository`, `IInventoryPipeline`), options e pipeline concorrente. |
-| Infraestrutura | `KrfReader.Infrastructure` | Drivers de leitor (Mock, Serial, TCP), protocolos plugáveis e repositório SQLite. |
+| Infraestrutura | `KrfReader.Infrastructure` | Drivers de leitor (Serial, TCP), protocolos plugáveis e repositório SQLite. |
 | Testes | `tests/KrfReader.Tests` | xUnit: domínio, dedup, troca de modo, idempotência, anomalia, SQLite, parser, ponta a ponta. |
 
 ### Mapa do código
@@ -83,7 +85,7 @@ KRF-Reader/
 │   │   └── Readers/                   # IRfidReader, IReaderProtocol, IRfidReaderFactory
 │   ├── KrfReader.Infrastructure/
 │   │   ├── Persistence/               # SqliteInventoryRepository (Dapper, upsert em lote; cadastro em .Catalog.cs)
-│   │   └── Readers/                   # MockReader, GenericSerialReader, GenericTcpReader, Protocols/AsciiLine
+│   │   └── Readers/                   # GenericSerialReader, GenericTcpReader, Protocols/ (R200/M100, R2000, AsciiLine)
 │   └── KrfReader.UI/                  # App, MainWindow, ViewModels, CompositionRoot, Assets
 └── tests/KrfReader.Tests/             # Domain, Pipeline, Persistence, Readers, Integration, Fakes
 ```
@@ -99,7 +101,7 @@ KRF-Reader/
 | [Pipeline/ReadFilter.cs](src/KrfReader.Application/Pipeline/ReadFilter.cs) | Filtro de RSSI mínimo e antenas aceitas. |
 | [Readers/StreamRfidReaderBase.cs](src/KrfReader.Infrastructure/Readers/StreamRfidReaderBase.cs) | Base de serial/TCP: transporte, reconexão e threading. |
 | [Readers/Protocols/AsciiLineProtocol.cs](src/KrfReader.Infrastructure/Readers/Protocols/AsciiLineProtocol.cs) | Parser `EPC,RSSI,ANTENA[,TIMESTAMP]` com frames parciais. |
-| [Readers/MockReader.cs](src/KrfReader.Infrastructure/Readers/MockReader.cs) | Simulador: população de tags, entrada e saída do campo, rajadas e leituras fantasma. |
+| [Fakes/MockReader.cs](tests/KrfReader.Tests/Fakes/MockReader.cs) | Simulador usado só nos testes: população de tags, entrada e saída do campo, rajadas e leituras fantasma. |
 | [Persistence/SqliteInventoryRepository.cs](src/KrfReader.Infrastructure/Persistence/SqliteInventoryRepository.cs) | Aplica o lote numa transação: carrega estado, decide, faz upsert e insere eventos. |
 | [Persistence/SqliteInventoryRepository.Catalog.cs](src/KrfReader.Infrastructure/Persistence/SqliteInventoryRepository.Catalog.cs) | CRUD de `TagCadastro` e consulta com descrição/SKU. |
 | [UI/CompositionRoot.cs](src/KrfReader.UI/CompositionRoot.cs) | Monta configuração, factories, repositório e pipeline. |
@@ -132,14 +134,14 @@ KRF-Reader/
 
 **CONFIGURAÇÃO.** Duas partes:
 
-- *Leitor RFID*: tipo (Mock, Serial, Tcp), porta serial e baud, host e porta TCP, protocolo, potência e antenas ativas. Só vale após **Aplicar leitor**, que desconecta e reconecta. Exige modo PARADO.
+- *Leitor RFID*: tipo (Serial, Tcp), porta serial e baud, host e porta TCP, protocolo, potência e antenas ativas. Só vale após **Aplicar leitor**, que desconecta e reconecta. Exige modo PARADO.
 - *Filtro de leituras*: RSSI mínimo e antenas aceitas. Vale na hora, sem reconectar.
 
 Fechar a janela com modo ativo grava as leituras pendentes antes de sair ("Encerrando...").
 
 Saída usa vermelho; o laranja do tema é reservado a destaque.
 
-Instrumentos da aba Operação: escala UHF com a faixa do leitor, osciloscópio (ilustrativo, amplitude = taxa de leituras), mostrador de leituras/s brutas e medidor de RSSI com a marca do RSSI mínimo do filtro. Os mesmos dados alimentam o medidor da aba Configurações.
+Instrumentos da aba Operação: escala UHF com a faixa do leitor, osciloscópio com o histórico real de leituras/s dos últimos 12 s, mostrador de leituras/s brutas e medidor de RSSI com a marca do RSSI mínimo do filtro. Os mesmos dados alimentam o medidor da aba Configurações.
 
 ### Regras de negócio
 
@@ -264,19 +266,19 @@ Notas de tipo estão em `db/schema.sql`.
 
 * .NET 8 SDK para compilar. O executável publicado é *self-contained*, sem runtime instalado.
 * Windows, Linux ou macOS.
-* Leitor físico é opcional: o app sobe com o **MockReader**.
+* Leitor físico obrigatório: o app sobe tentando o R200 na COM3. Sem leitor, mostra o erro na barra de status; conecte o leitor e use **Aplicar leitor** na aba Configuração.
 
 ### Build, testes e publish
 
 ```bash
 git clone https://github.com/GZimbra/KRF-Reader.git && cd KRF-Reader
-dotnet run  --project src/KrfReader.UI        # sobe com o MockReader
-dotnet test KrfReader.sln                     # 168 casos de teste, sem hardware e sem rede
+dotnet run  --project src/KrfReader.UI        # conecta no R200 (COM3)
+dotnet test KrfReader.sln                     # 199 casos de teste, sem hardware e sem rede
 dotnet publish src/KrfReader.UI -c Release -r win-x64   --self-contained -p:PublishSingleFile=true -o publish/win-x64
 dotnet publish src/KrfReader.UI -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true -o publish/linux-x64
 ```
 
-Com o Mock: clique em **ENTRADA**, veja as leituras chegarem e os contadores mudarem, depois **PARAR**. O banco
+Com o leitor conectado: clique em **ENTRADA**, passe as tags e veja os contadores mudarem, depois **PARAR**. O banco
 `krf-reader.db` é criado no diretório de execução, com o schema aplicado no start (manual:
 `sqlite3 krf-reader.db < db/schema.sql`). Em produção, aponte `Database.ConnectionString` para um caminho absoluto
 com permissão de escrita. `appsettings.json` já vai na saída do publish.
@@ -289,8 +291,9 @@ Fontes (a última vence): `src/KrfReader.UI/appsettings.json` → `appsettings.L
 
 | Seção | Chave | Significado |
 |---|---|---|
-| `Reader` | `Type` | `Mock`, `Serial` ou `Tcp` |
-| | `Protocol` | Protocolo registrado para Serial/Tcp (padrão `AsciiLine`) |
+| `Reader` | `Model` | Perfil do catálogo (padrão `r200`) |
+| | `Type` | `Serial` ou `Tcp` |
+| | `Protocol` | Protocolo registrado para Serial/Tcp (padrão `R200`) |
 | | `Serial.PortName` / `BaudRate` / `DataBits` / `Parity` / `StopBits` | Porta serial |
 | | `Tcp.Host` / `Port` / `ConnectTimeoutMs` | Leitor em rede |
 | | `PowerDbm` | Potência de transmissão (0–33 dBm). É o principal controle de alcance. |
@@ -312,7 +315,7 @@ Fontes (a última vence): `src/KrfReader.UI/appsettings.json` → `appsettings.L
 | `Domain/` | `InventoryRules.Decide` (tabela completa), normalização de EPC, validação do cadastro, literais do banco |
 | `Pipeline/` | Deduplicação por geração, filtro RSSI/antena, troca de modo, barreira de PARAR, shutdown, concorrência do estado de modo, captura para cadastro |
 | `Persistence/` | `SqliteInventoryRepository` contra SQLite real: criação, mudança de status, idempotência, anomalia, lote de 2000 leituras, consultas, cadastro de tags e migração de banco antigo |
-| `Readers/` | Parser `AsciiLine` (frames parciais, lixo), factory de protocolos, MockReader |
+| `Readers/` | Parser `AsciiLine` (frames parciais, lixo), factory de protocolos, MockReader (fake de teste) |
 | `Integration/` | Ponta a ponta: leitor fake → pipeline → SQLite |
 
 ### Contribuição
@@ -395,7 +398,8 @@ nunca foi lida) e por isso foi evitada.
 
 <br/>
 
-O pipeline, o banco e o parser foram testados com leitor fake, MockReader e SQLite real. O leitor de produção ainda
-não está definido; quando estiver, o primeiro passo é calibrar `PowerDbm` e `MinRssi` no portal real.
+O pipeline, o banco e os parsers foram testados com leitores fake e SQLite real. Com o R200 físico, a comunicação foi
+validada, mas a leitura de tags não (sem antena). Ao instalar a antena, o primeiro passo é confirmar a leitura e
+calibrar `PowerDbm` e `MinRssi` no portal real.
 
 </details>

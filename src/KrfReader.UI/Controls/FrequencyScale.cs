@@ -5,8 +5,8 @@ using Avalonia.Media;
 namespace KrfReader.UI.Controls;
 
 /// <summary>
-/// Escala de sintonia da banda UHF (MHz). Com <see cref="IsLive"/> o cursor salta entre canais de 500 kHz,
-/// como no salto de frequência do leitor. É indicativo: o canal real não é informado pelo leitor.
+/// Escala de sintonia da banda UHF (MHz) com a faixa configurada no leitor destacada. Com <see cref="IsLive"/>
+/// (inventário rodando) o destaque acende. O canal instantâneo não é mostrado: o leitor não o informa.
 /// </summary>
 public sealed class FrequencyScale : AnimatedControl
 {
@@ -16,7 +16,7 @@ public sealed class FrequencyScale : AnimatedControl
     public static readonly StyledProperty<double> MaximumProperty =
         AvaloniaProperty.Register<FrequencyScale, double>(nameof(Maximum), 928);
 
-    /// <summary>Faixa configurada no leitor (NaN = banda inteira). Destacada na escala; o cursor salta dentro dela.</summary>
+    /// <summary>Faixa configurada no leitor (NaN = sem destaque).</summary>
     public static readonly StyledProperty<double> BandMinimumProperty =
         AvaloniaProperty.Register<FrequencyScale, double>(nameof(BandMinimum), double.NaN);
 
@@ -33,12 +33,6 @@ public sealed class FrequencyScale : AnimatedControl
         AvaloniaProperty.Register<FrequencyScale, Color>(nameof(CursorColor), Color.Parse("#FFA600"));
 
     private const double ChannelMHz = 0.5;
-    private const double HopSeconds = 0.2;
-
-    private readonly Random _random = new(915);
-    private double _cursor = 915;
-    private double _hopTimer;
-    private readonly double[] _trail = new double[4];
 
     static FrequencyScale()
     {
@@ -53,36 +47,15 @@ public sealed class FrequencyScale : AnimatedControl
     public Color ScaleColor { get => GetValue(ScaleColorProperty); set => SetValue(ScaleColorProperty, value); }
     public Color CursorColor { get => GetValue(CursorColorProperty); set => SetValue(CursorColorProperty, value); }
 
-    protected override bool WantsAnimation => IsLive;
-
-    protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
-    {
-        base.OnPropertyChanged(change);
-        if (change.Property == IsLiveProperty)
-            UpdateAnimation();
-    }
+    protected override bool WantsAnimation => false;
 
     protected override void OnFrame(double dt)
     {
-        _hopTimer += dt;
-        if (_hopTimer < HopSeconds)
-            return;
-        _hopTimer = 0;
-
-        for (var i = _trail.Length - 1; i > 0; i--)
-            _trail[i] = _trail[i - 1];
-        _trail[0] = _cursor;
-
-        var (lo, hi) = HopRange;
-        var channels = (int)((hi - lo) / ChannelMHz);
-        _cursor = lo + ChannelMHz * (0.5 + _random.Next(Math.Max(1, channels)));
     }
 
     private bool HasBand => !double.IsNaN(BandMinimum) && !double.IsNaN(BandMaximum) && BandMaximum > BandMinimum;
 
-    private (double Lo, double Hi) HopRange => HasBand
-        ? (Math.Max(Minimum, BandMinimum), Math.Min(Maximum, BandMaximum))
-        : (Minimum, Maximum);
+    private (double Lo, double Hi) BandRange => (Math.Max(Minimum, BandMinimum), Math.Min(Maximum, BandMaximum));
 
     public override void Render(DrawingContext context)
     {
@@ -99,8 +72,8 @@ public sealed class FrequencyScale : AnimatedControl
         context.DrawLine(new Pen(scale, 1), new Point(0, baseline + 0.5), new Point(w, baseline + 0.5));
         if (HasBand)
         {
-            var (lo, hi) = HopRange;
-            context.FillRectangle(new SolidColorBrush(WithAlpha(CursorColor, 0.10)), new Rect(X(lo), 0, X(hi) - X(lo), baseline));
+            var (lo, hi) = BandRange;
+            context.FillRectangle(new SolidColorBrush(WithAlpha(CursorColor, IsLive ? 0.22 : 0.10)), new Rect(X(lo), 0, X(hi) - X(lo), baseline));
             context.FillRectangle(new SolidColorBrush(CursorColor), new Rect(X(lo), baseline - 1, X(hi) - X(lo), 2));
         }
 
@@ -121,22 +94,5 @@ public sealed class FrequencyScale : AnimatedControl
             var tx = Math.Clamp(x - text.Width / 2, 0, w - text.Width);
             context.DrawText(text, new Point(tx, baseline + 2));
         }
-
-        if (!IsLive)
-            return;
-
-        var cursor = CursorColor;
-        for (var i = 0; i < _trail.Length; i++)
-        {
-            if (_trail[i] <= 0)
-                continue;
-            var tx = X(_trail[i]);
-            context.DrawLine(new Pen(new SolidColorBrush(WithAlpha(cursor, 0.30 - 0.07 * i)), 1.5),
-                new Point(tx, 0), new Point(tx, baseline));
-        }
-
-        var cx = X(_cursor);
-        context.DrawLine(new Pen(new SolidColorBrush(WithAlpha(cursor, 0.25)), 7), new Point(cx, 0), new Point(cx, baseline));
-        context.DrawLine(new Pen(new SolidColorBrush(cursor), 2), new Point(cx, 0), new Point(cx, baseline));
     }
 }

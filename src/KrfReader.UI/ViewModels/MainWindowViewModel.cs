@@ -310,16 +310,15 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     // ───────────────────────── Configuração ─────────────────────────
 
-    public string[] ReaderTypes { get; } = ["Mock (simulado)", "Serial", "TCP/IP"];
+    public string[] ReaderTypes { get; } = ["Serial", "TCP/IP"];
     public IReadOnlyList<string> Protocols { get; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsSerialSelected), nameof(IsTcpSelected), nameof(IsProtocolRelevant))]
+    [NotifyPropertyChangedFor(nameof(IsSerialSelected), nameof(IsTcpSelected))]
     private int _readerTypeIndex;
 
     public bool IsSerialSelected => ReaderTypeIndex == (int)ReaderType.Serial;
     public bool IsTcpSelected => ReaderTypeIndex == (int)ReaderType.Tcp;
-    public bool IsProtocolRelevant => IsSerialSelected || IsTcpSelected;
 
     [ObservableProperty] private string? _selectedProtocol;
     [ObservableProperty] private string? _serialPortName;
@@ -356,9 +355,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
             var m = SelectedReaderModel;
             var connection = m.Type switch
             {
-                ReaderType.Serial => $"Serial · {m.DefaultBaudRate} baud 8N1",
                 ReaderType.Tcp => $"TCP/IP · porta {m.DefaultTcpPort}",
-                _ => "Simulado",
+                _ => $"Serial · {m.DefaultBaudRate} baud 8N1",
             };
             SpecItem[] items =
             [
@@ -366,7 +364,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 new("Chip / firmware", m.Chip),
                 new("Interface", m.Interface),
                 new("Conexão padrão", connection),
-                new("Protocolo", m.Type == ReaderType.Mock ? "" : m.Protocol),
+                new("Protocolo", m.Protocol),
                 new("Frequência", m.FrequencyBand),
                 new("Quadro", m.FrameFormat),
                 new("Potência", m.IsCustom ? "" : $"{m.MinPowerDbm:0}–{m.MaxPowerDbm:0} dBm (padrão {m.DefaultPowerDbm:0})"),
@@ -384,7 +382,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             return;
 
         ReaderTypeIndex = (int)value.Type;
-        if (value.Type != ReaderType.Mock && Protocols.Contains(value.Protocol, StringComparer.OrdinalIgnoreCase))
+        if (Protocols.Contains(value.Protocol, StringComparer.OrdinalIgnoreCase))
             SelectedProtocol = Protocols.First(p => string.Equals(p, value.Protocol, StringComparison.OrdinalIgnoreCase));
         if (value.Type == ReaderType.Serial)
             BaudRate = value.DefaultBaudRate;
@@ -528,7 +526,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private bool TryBuildReaderOptions(out ReaderOptions options, out string error)
     {
         options = null!;
-        var type = (ReaderType)Math.Clamp(ReaderTypeIndex, 0, 2);
+        var type = (ReaderType)Math.Clamp(ReaderTypeIndex, 0, 1);
 
         if (PowerDbm is not { } power || power < 0 || power > 33)
         {
@@ -586,7 +584,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             }
         }
 
-        if (type != ReaderType.Mock && string.IsNullOrWhiteSpace(SelectedProtocol))
+        if (string.IsNullOrWhiteSpace(SelectedProtocol))
         {
             error = "Selecione um protocolo.";
             return false;
@@ -599,7 +597,6 @@ public sealed partial class MainWindowViewModel : ObservableObject
             Protocol = SelectedProtocol ?? _baseReaderOptions.Protocol,
             Serial = serial,
             Tcp = tcp,
-            Mock = _baseReaderOptions.Mock,
             PowerDbm = (double)power,
             Antennas = antennas,
             ReconnectDelayMs = _baseReaderOptions.ReconnectDelayMs,

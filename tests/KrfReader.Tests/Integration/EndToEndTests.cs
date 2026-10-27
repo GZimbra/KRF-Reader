@@ -2,7 +2,7 @@ using KrfReader.Application.Configuration;
 using KrfReader.Application.Pipeline;
 using KrfReader.Domain;
 using KrfReader.Infrastructure.Persistence;
-using KrfReader.Infrastructure.Readers;
+using KrfReader.Tests.Fakes;
 
 namespace KrfReader.Tests.Integration;
 
@@ -19,19 +19,16 @@ public sealed class EndToEndTests : IAsyncLifetime
         _repo = new SqliteInventoryRepository(new DatabaseOptions { ConnectionString = $"Data Source={_dbPath}" });
         await _repo.InitializeAsync();
 
-        _reader = new MockReader(new ReaderOptions
-        {
-            Type = ReaderType.Mock,
-            Antennas = [1, 2],
-            Mock = new MockReaderOptions
+        _reader = new MockReader(
+            new ReaderOptions { Antennas = [1, 2] },
+            new MockReaderOptions
             {
                 Seed = 42,
                 TagPopulation = 40,
                 ReadsPerSecond = 300,
                 TagsInFieldAtOnce = 8,
                 FieldChurnMs = 300,
-            },
-        });
+            });
 
         _pipeline = new InventoryPipeline(_reader, _repo, new PipelineOptions
         {

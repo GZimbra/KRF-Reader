@@ -4,9 +4,9 @@ using Avalonia.Media;
 namespace KrfReader.UI.Controls;
 
 /// <summary>
-/// Tela de osciloscópio com retícula e traço de fósforo. A amplitude acompanha <see cref="Level"/>
-/// (0–1, taxa de leituras normalizada). Com <see cref="IsLive"/> false o traço fica reto e o timer para.
-/// O desenho é ilustrativo: não é a forma de onda real do leitor.
+/// Tela de osciloscópio com retícula e traço de fósforo, usada como registrador: o traço é o histórico de
+/// <see cref="Level"/> (0–1, taxa real de leituras normalizada) nos últimos <see cref="WindowSeconds"/> s,
+/// com a amostra mais nova à direita. Com <see cref="IsLive"/> false a amostragem para e o traço congela.
 /// </summary>
 public sealed class Oscilloscope : AnimatedControl
 {
@@ -23,12 +23,14 @@ public sealed class Oscilloscope : AnimatedControl
         AvaloniaProperty.Register<Oscilloscope, Color>(nameof(GridColor), Color.Parse("#2C2C2C"));
 
     private const int Divisions = 12;
-    private const int Persistence = 3;
+    private const double SampleSeconds = 0.1;
+    public const double WindowSeconds = 12;
+    private const int SampleCount = (int)(WindowSeconds / SampleSeconds);
 
-    private readonly double[] _phaseHistory = new double[Persistence];
-    private double _phase;
-    private double _shownLevel;
-    private int _frame;
+    private readonly double[] _samples = new double[SampleCount];
+    private int _newest = -1;
+    private int _filled;
+    private double _sampleTimer;
 
     static Oscilloscope()
     {
@@ -59,30 +61,28 @@ public sealed class Oscilloscope : AnimatedControl
         set => SetValue(GridColorProperty, value);
     }
 
-    protected override bool WantsAnimation => IsLive || _shownLevel > 0.002;
+    protected override bool WantsAnimation => IsLive;
 
     protected override void OnPropertyChanged(AvaloniaPropertyChangedEventArgs change)
     {
         base.OnPropertyChanged(change);
-        if (change.Property == IsLiveProperty || change.Property == LevelProperty)
+        if (change.Property == IsLiveProperty)
         {
-            if (VisualRoot is null)
-                _shownLevel = TargetLevel;
+            _sampleTimer = 0;
             UpdateAnimation();
         }
     }
 
-    private double TargetLevel => IsLive ? Math.Clamp(Level, 0, 1) : 0;
-
     protected override void OnFrame(double dt)
     {
-        for (var i = Persistence - 1; i > 0; i--)
-            _phaseHistory[i] = _phaseHistory[i - 1];
-        _phaseHistory[0] = _phase;
-
-        _shownLevel += (TargetLevel - _shownLevel) * Math.Min(1, dt * 6);
-        _phase += dt * (2.2 + 5 * _shownLevel);
-        _frame++;
+        _sampleTimer += dt;
+        while (_sampleTimer >= SampleSeconds)
+        {
+            _sampleTimer -= SampleSeconds;
+            _newest = (_newest + 1) % SampleCount;
+            _samples[_newest] = Math.Clamp(Level, 0, 1);
+            _filled = Math.Min(_filled + 1, SampleCount);
+        }
     }
 
     public override void Render(DrawingContext context)
@@ -94,22 +94,16 @@ public sealed class Oscilloscope : AnimatedControl
 
         DrawGraticule(context, w, h);
 
-        var trace = TraceColor;
-        if (!IsLive && _shownLevel <= 0.002)
+        var trace = IsLive ? TraceColor : WithAlpha(TraceColor, 0.45);
+        if (_filled < 2)
         {
-            var flat = new Pen(new SolidColorBrush(WithAlpha(trace, 0.45)), 1.5);
-            context.DrawLine(flat, new Point(0, h / 2), new Point(w, h / 2));
+            context.DrawLine(new Pen(new SolidColorBrush(WithAlpha(TraceColor, 0.45)), 1.5), new Point(0, h - 1.5), new Point(w, h - 1.5));
             return;
         }
 
-        for (var i = Persistence - 1; i >= 0; i--)
-        {
-            var alpha = 0.10 + 0.08 * (Persistence - 1 - i);
-            context.DrawGeometry(null, new Pen(new SolidColorBrush(WithAlpha(trace, alpha)), 1.2), BuildTrace(w, h, _phaseHistory[i], _frame - i - 1));
-        }
-
-        var geometry = BuildTrace(w, h, _phase, _frame);
-        context.DrawGeometry(null, new Pen(new SolidColorBrush(WithAlpha(trace, 0.18)), 6, lineCap: PenLineCap.Round), geometry);
+        var geometry = BuildTrace(w, h);
+        if (IsLive)
+            context.DrawGeometry(null, new Pen(new SolidColorBrush(WithAlpha(trace, 0.18)), 6, lineCap: PenLineCap.Round), geometry);
         context.DrawGeometry(null, new Pen(new SolidColorBrush(trace), 1.6, lineCap: PenLineCap.Round, lineJoin: PenLineJoin.Round), geometry);
     }
 
@@ -143,40 +137,25 @@ public sealed class Oscilloscope : AnimatedControl
             context.DrawLine(axis, new Point(cx - 2, Math.Round(y) + 0.5), new Point(cx + 3, Math.Round(y) + 0.5));
     }
 
-    private StreamGeometry BuildTrace(double w, double h, double phase, int frame)
+    /// <summary>Linha do histórico: x = tempo (mais novo à direita), y = nível (0 embaixo, 1 no topo).</summary>
+    private StreamGeometry BuildTrace(double w, double h)
     {
-        var level = _shownLevel;
-        var amp = h * 0.42 * (0.05 + 0.95 * level);
-        var steps = Math.Max(16, (int)(w / 3));
-
         var geometry = new StreamGeometry();
         using var ctx = geometry.Open();
-        for (var i = 0; i <= steps; i++)
+        var step = w / (SampleCount - 1);
+        for (var k = 0; k < _filled; k++)
         {
-            var t = (double)i / steps;
-            var carrier = Math.Sin(2 * Math.PI * t * 7 + phase * 3.1);
-            var envelope = 0.55 + 0.45 * Math.Sin(2 * Math.PI * t * 1.25 - phase * 0.8);
-            var harmonic = 0.15 * Math.Sin(2 * Math.PI * t * 23 + phase * 5.3) * level;
-            var noise = (Hash(i, frame) - 0.5) * (0.06 + 0.10 * level);
-            var y = h / 2 - amp * (carrier * envelope + harmonic + noise);
-            var p = new Point(w * t, Math.Clamp(y, 1, h - 1));
-            if (i == 0)
+            var index = (_newest - k + SampleCount) % SampleCount;
+            var x = w - k * step;
+            var y = (h - 2) - _samples[index] * (h - 4) + 0.5;
+            var p = new Point(x, y);
+            if (k == 0)
                 ctx.BeginFigure(p, false);
             else
                 ctx.LineTo(p);
         }
         ctx.EndFigure(false);
         return geometry;
-    }
-
-    private static double Hash(int i, int frame)
-    {
-        unchecked
-        {
-            var n = (uint)(i * 374761393 + frame * 668265263);
-            n = (n ^ (n >> 13)) * 1274126177;
-            return (n ^ (n >> 16)) / (double)uint.MaxValue;
-        }
     }
 
     private static Color Lighten(Color c, double amount) => Color.FromArgb(c.A,

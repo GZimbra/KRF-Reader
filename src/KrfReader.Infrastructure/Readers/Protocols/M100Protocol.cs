@@ -42,6 +42,22 @@ public sealed class M100Protocol : IReaderProtocol, IInventoryRefreshProtocol
     internal const byte CmdMultiPoll = 0x27;
     internal const byte CmdStopMultiPoll = 0x28;
     internal const byte CmdSetPower = 0xB6;
+    internal const byte CmdSetRegion = 0x07;
+    internal const byte CmdInsertChannels = 0xA9;
+    internal const byte CmdSetAutoHopping = 0xAD;
+
+    /// <summary>Região "US" do M100: canal n = 902,25 + 0,5·n MHz (n = 0..51).</summary>
+    internal const byte RegionUs = 0x02;
+
+    /// <summary>
+    /// Plano de canais Anatel (Brasil): 915–928 MHz. Canais US 26..51 = 915,25–927,75 MHz (26 canais, salto
+    /// automático). A região US inteira (902–928) não serve: 907,5–915 MHz é proibido para RFID no Brasil.
+    /// </summary>
+    public const int FirstChannel = 26;
+    public const int LastChannel = 51;
+    public const string FrequencyBand = "915,25–927,75 MHz · 26 canais com salto (Anatel)";
+
+    public static double ChannelMhz(int channel) => 902.25 + 0.5 * channel;
 
     private const int FrameOverhead = 7; // HEADER tipo cmd PLh PLl cs END
     private const ushort MultiPollRounds = 0xFFFF;
@@ -133,10 +149,18 @@ public sealed class M100Protocol : IReaderProtocol, IInventoryRefreshProtocol
     public IReadOnlyList<byte[]> BuildConfigureCommands(double powerDbm, IReadOnlyCollection<int> antennas)
     {
         var centiDbm = (int)Math.Round(Math.Clamp(powerDbm, MinPowerDbm, MaxPowerDbm) * 100);
+        var channels = new byte[1 + LastChannel - FirstChannel + 1];
+        channels[0] = (byte)(channels.Length - 1);
+        for (var i = 1; i < channels.Length; i++)
+            channels[i] = (byte)(FirstChannel + i - 1);
+
         return
         [
             // Um multi-poll de sessão anterior pode continuar rodando no módulo.
             BuildFrame(CmdStopMultiPoll, []),
+            BuildFrame(CmdSetRegion, [RegionUs]),
+            BuildFrame(CmdInsertChannels, channels),
+            BuildFrame(CmdSetAutoHopping, [0xFF]),
             BuildFrame(CmdSetPower, [(byte)(centiDbm >> 8), (byte)centiDbm]),
         ];
     }

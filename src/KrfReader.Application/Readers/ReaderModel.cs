@@ -40,6 +40,9 @@ public sealed record ReaderModel
     /// <summary>Interface física (ex.: "USB (CH340) → UART").</summary>
     public string Interface { get; init; } = "";
 
+    /// <summary>Faixa de frequência configurada pelo app (vazio = a do próprio leitor).</summary>
+    public string FrequencyBand { get; init; } = "";
+
     /// <summary>Formato do quadro do protocolo, para referência técnica.</summary>
     public string FrameFormat { get; init; } = "";
 

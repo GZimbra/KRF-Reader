@@ -366,6 +366,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 new("Interface", m.Interface),
                 new("Conexão padrão", connection),
                 new("Protocolo", m.Type == ReaderType.Mock ? "" : m.Protocol),
+                new("Frequência", m.FrequencyBand),
                 new("Quadro", m.FrameFormat),
                 new("Potência", m.IsCustom ? "" : $"{m.MinPowerDbm:0}–{m.MaxPowerDbm:0} dBm (padrão {m.DefaultPowerDbm:0})"),
                 new("Antenas", m.IsCustom ? "" : m.AntennaPorts.ToString(CultureInfo.InvariantCulture)),

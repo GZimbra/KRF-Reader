@@ -92,9 +92,9 @@ public class M100ProtocolTests
     {
         var commands = M100Protocol.CreateR200().BuildConfigureCommands(dbm, [1, 2]);
 
-        Assert.Equal(2, commands.Count);
+        Assert.Equal(5, commands.Count);
         Assert.Equal("AA0028000028DD", Convert.ToHexString(commands[0]));
-        Assert.Equal(expectedSetPower, Convert.ToHexString(commands[1]));
+        Assert.Equal(expectedSetPower, Convert.ToHexString(commands[^1]));
     }
 
     [Fact]
@@ -130,5 +130,19 @@ public class M100ProtocolTests
         Assert.Equal("BB0028000028" + "7E", Convert.ToHexString(p.BuildStopInventoryCommand()));
         Assert.Equal(TagEpc, Assert.Single(p.Feed(notice, Now)).Epc);
         Assert.Empty(M100Protocol.CreateR200().Feed(notice, Now));
+    }
+
+    [Fact]
+    public void Configura_regiao_e_canais_Anatel_915_a_928_MHz()
+    {
+        var commands = M100Protocol.CreateR200().BuildConfigureCommands(20, [1]);
+
+        // Quadros enviados ao módulo real (todos responderam status 00).
+        Assert.Equal("AA0007000102" + "0ADD", Convert.ToHexString(commands[1]));
+        Assert.Equal("AA00A9001B1A1A1B1C1D1E1F202122232425262728292A2B2C2D2E2F30313233C7DD", Convert.ToHexString(commands[2]));
+        Assert.Equal("AA00AD0001FFADDD", Convert.ToHexString(commands[3]));
+
+        Assert.Equal(915.25, M100Protocol.ChannelMhz(M100Protocol.FirstChannel));
+        Assert.Equal(927.75, M100Protocol.ChannelMhz(M100Protocol.LastChannel));
     }
 }

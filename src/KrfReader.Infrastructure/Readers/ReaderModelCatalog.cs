@@ -1,4 +1,4 @@
-using KrfReader.Application.Configuration;
+﻿using KrfReader.Application.Configuration;
 using KrfReader.Application.Readers;
 using KrfReader.Infrastructure.Readers.Protocols;
 
@@ -70,8 +70,9 @@ public sealed class ReaderModelCatalog : IReaderModelCatalog
             AntennaPorts = 1,
             Chip = "MagicRF M100 (ISO 18000-6C / EPC C1G2, 840–960 MHz)",
             Interface = "USB → CH340 (VID 1A86, PID 7523) → UART 115200 8N1, DTR/RTS desligados",
+            FrequencyBand = M100Protocol.FrequencyBand,
             FrameFormat = "AA | Tipo | Cmd | PL(2) | Params | Soma | DD",
-            Notes = "Validado: identificação, potência, inventário e parada. Potência abaixo de 15 dBm é fixada em 15 pelo módulo. "
+            Notes = "Validado: identificação, potência, região/canais, inventário e parada. Ao conectar, o app define região US com só os canais 915–928 MHz (Anatel). Potência abaixo de 15 dBm é fixada em 15 pelo módulo. "
                   + "Nunca opere sem antena UHF no conector SMA: a potência refletida pode danificar o amplificador.",
             Validated = true,
         };
@@ -89,6 +90,7 @@ public sealed class ReaderModelCatalog : IReaderModelCatalog
             AntennaPorts = 1,
             Chip = "MagicRF M100",
             Interface = "UART 3,3 V ou USB-serial, 115200 8N1",
+            FrequencyBand = M100Protocol.FrequencyBand,
             FrameFormat = "BB | Tipo | Cmd | PL(2) | Params | Soma | 7E",
             Notes = "Mesmos comandos do R200 com delimitadores BB/7E. Se o módulo não responder, teste o perfil R200.",
         };
@@ -107,7 +109,7 @@ public sealed class ReaderModelCatalog : IReaderModelCatalog
             Chip = "Impinj R2000",
             Interface = "RS-232 / USB-serial, 115200 8N1 (alguns modelos 38400)",
             FrameFormat = "A0 | Len | Endereço | Cmd | Dados | Check (compl. de 2)",
-            Notes = "Inventário em tempo real (0x89) rearmado a cada 300 ms. Só a primeira antena da lista é usada. Não validado em hardware.",
+            Notes = "Faixa de frequência: a configurada no próprio leitor (o app não altera); no Brasil use 915–928 MHz. Inventário em tempo real (0x89) rearmado a cada 300 ms. Só a primeira antena da lista é usada. Não validado em hardware.",
         };
         yield return new ReaderModel
         {

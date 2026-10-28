@@ -5,8 +5,8 @@ using KrfReader.Application.Configuration;
 namespace KrfReader.UI;
 
 /// <summary>
-/// Grava a seção <c>Reader</c> em <c>appsettings.Local.json</c> (ao lado do executável), que sobrescreve o
-/// appsettings.json na próxima abertura. As demais seções do arquivo local são preservadas.
+/// Grava as seções <c>Reader</c> e <c>Database</c> em <c>appsettings.Local.json</c> (ao lado do executável), que
+/// sobrescreve o appsettings.json na próxima abertura. As demais seções do arquivo local são preservadas.
 /// </summary>
 public static class ReaderSettingsStore
 {
@@ -14,24 +14,11 @@ public static class ReaderSettingsStore
 
     public static string FilePath => Path.Combine(AppContext.BaseDirectory, FileName);
 
-    public static async Task SaveAsync(ReaderOptions options, CancellationToken cancellationToken = default)
+    public static Task SaveAsync(ReaderOptions options, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
-        var path = FilePath;
-
-        JsonObject root;
-        if (File.Exists(path))
-        {
-            await using var input = File.OpenRead(path);
-            root = await JsonNode.ParseAsync(input, cancellationToken: cancellationToken).ConfigureAwait(false) as JsonObject ?? [];
-        }
-        else
-        {
-            root = [];
-        }
-
         var inventory = options.Inventory ?? new InventoryOptions();
-        root[ReaderOptions.SectionName] = new JsonObject
+        return SaveSectionAsync(ReaderOptions.SectionName, new JsonObject
         {
             [nameof(ReaderOptions.Model)] = options.Model,
             [nameof(ReaderOptions.Type)] = options.Type.ToString(),
@@ -65,7 +52,36 @@ public static class ReaderSettingsStore
                 [nameof(InventoryOptions.SelectEpcPrefix)] = inventory.SelectEpcPrefix,
                 [nameof(InventoryOptions.CommandGapMs)] = inventory.CommandGapMs,
             },
-        };
+        }, cancellationToken);
+    }
+
+    /// <summary>Provider + connection string. Vale na próxima abertura (o repositório é montado na inicialização).</summary>
+    public static Task SaveAsync(DatabaseOptions options, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return SaveSectionAsync(DatabaseOptions.SectionName, new JsonObject
+        {
+            [nameof(DatabaseOptions.Provider)] = options.Provider,
+            [nameof(DatabaseOptions.ConnectionString)] = options.ConnectionString,
+        }, cancellationToken);
+    }
+
+    private static async Task SaveSectionAsync(string sectionName, JsonObject section, CancellationToken cancellationToken)
+    {
+        var path = FilePath;
+
+        JsonObject root;
+        if (File.Exists(path))
+        {
+            await using var input = File.OpenRead(path);
+            root = await JsonNode.ParseAsync(input, cancellationToken: cancellationToken).ConfigureAwait(false) as JsonObject ?? [];
+        }
+        else
+        {
+            root = [];
+        }
+
+        root[sectionName] = section;
 
         var tmp = path + ".tmp";
         await File.WriteAllTextAsync(tmp, root.ToJsonString(new JsonSerializerOptions { WriteIndented = true }), cancellationToken)

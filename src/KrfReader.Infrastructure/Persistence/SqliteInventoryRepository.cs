@@ -85,12 +85,7 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
 
         var modeDb = mode.ToDb(); // valida o enum antes de abrir conexão
 
-        var epcs = new string[reads.Count];
-        for (var i = 0; i < reads.Count; i++)
-        {
-            epcs[i] = Epc.Normalize(reads[i].Epc)
-                ?? throw new ArgumentException($"EPC inválido na posição {i}: '{reads[i].Epc}'.", nameof(reads));
-        }
+        var epcs = BatchPlanner.NormalizeEpcs(reads);
 
         var sw = Stopwatch.StartNew();
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
@@ -98,66 +93,27 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
         try
         {
             var state = await LoadStatusAsync(connection, transaction, epcs, cancellationToken).ConfigureAwait(false);
+            var plan = BatchPlanner.Build(mode, reads, epcs, state);
 
-            var applied = new AppliedRead[reads.Count];
-            var pending = new Dictionary<string, PendingTag>(StringComparer.Ordinal);
-            var events = new List<EventRow>();
-
-            for (var i = 0; i < reads.Count; i++)
+            var upserts = plan.Upserts.Select(u => new TagUpsertRow
             {
-                var read = reads[i];
-                var epc = epcs[i];
-                state.TryGetValue(epc, out var previous);
-                var decision = InventoryRules.Decide(previous, mode);
-                var timestamp = DbTimestamp.ToDb(read.TimestampUtc);
-
-                applied[i] = new AppliedRead(read, mode, previous, decision.NewStatus, decision.Event);
-                state[epc] = decision.NewStatus;
-
-                if (!pending.TryGetValue(epc, out var tag))
-                {
-                    tag = new PendingTag(timestamp, read.AntennaId, read.Rssi);
-                    pending[epc] = tag;
-                }
-                tag.Status = decision.NewStatus;
-                if (string.CompareOrdinal(timestamp, tag.UltimaLeitura) >= 0)
-                {
-                    tag.UltimaLeitura = timestamp;
-                    tag.UltimaAntenaId = read.AntennaId;
-                    tag.UltimaRssi = read.Rssi;
-                }
-
-                if (decision.Event is { } evt)
-                {
-                    tag.StatusChanged = true;
-                    tag.UltimaAtualizacaoStatus = timestamp;
-                    events.Add(new EventRow
-                    {
-                        EpcId = epc,
-                        Modo = modeDb,
-                        Tipo = evt.ToDb(),
-                        Timestamp = timestamp,
-                        AntenaId = read.AntennaId,
-                        Rssi = read.Rssi,
-                    });
-                }
-            }
-
-            var upserts = new List<TagUpsertRow>(pending.Count);
-            foreach (var (epc, tag) in pending)
+                EpcId = u.EpcId,
+                Status = u.Status.ToDb(),
+                UltimaLeitura = DbTimestamp.ToDb(u.UltimaLeitura),
+                UltimaAtualizacaoStatus = DbTimestamp.ToDb(u.UltimaAtualizacaoStatus),
+                UltimaAntenaId = u.UltimaAntenaId,
+                UltimaRssi = u.UltimaRssi,
+                StatusChanged = u.StatusChanged ? 1 : 0,
+            }).ToList();
+            var events = plan.Events.Select(e => new EventRow
             {
-                upserts.Add(new TagUpsertRow
-                {
-                    EpcId = epc,
-                    Status = tag.Status.ToDb(),
-                    UltimaLeitura = tag.UltimaLeitura,
-                    // Para tag já existente sem mudança, o valor é ignorado pelo CASE do upsert.
-                    UltimaAtualizacaoStatus = tag.UltimaAtualizacaoStatus ?? tag.UltimaLeitura,
-                    UltimaAntenaId = tag.UltimaAntenaId,
-                    UltimaRssi = tag.UltimaRssi,
-                    StatusChanged = tag.StatusChanged ? 1 : 0,
-                });
-            }
+                EpcId = e.EpcId,
+                Modo = modeDb,
+                Tipo = e.Tipo.ToDb(),
+                Timestamp = DbTimestamp.ToDb(e.Timestamp),
+                AntenaId = e.AntenaId,
+                Rssi = e.Rssi,
+            }).ToList();
 
             // Tags antes de Eventos por causa da FK.
             await connection.ExecuteAsync(new CommandDefinition(UpsertTagSql, upserts, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
@@ -168,7 +124,7 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
 
             _logger.LogDebug("Lote {Mode} aplicado: {Reads} leituras, {Tags} tags, {Events} eventos em {Elapsed} ms.",
                 modeDb, reads.Count, upserts.Count, events.Count, sw.ElapsedMilliseconds);
-            return new BatchResult(applied);
+            return new BatchResult(plan.Applied);
         }
         catch (Exception ex)
         {
@@ -332,16 +288,6 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
         var directory = Path.GetDirectoryName(Path.GetFullPath(dataSource));
         if (!string.IsNullOrEmpty(directory))
             Directory.CreateDirectory(directory);
-    }
-
-    private sealed class PendingTag(string firstTimestamp, int antennaId, double rssi)
-    {
-        public TagStatus Status { get; set; }
-        public string UltimaLeitura { get; set; } = firstTimestamp;
-        public int UltimaAntenaId { get; set; } = antennaId;
-        public double UltimaRssi { get; set; } = rssi;
-        public string? UltimaAtualizacaoStatus { get; set; }
-        public bool StatusChanged { get; set; }
     }
 
     private sealed record StatusRow

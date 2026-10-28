@@ -58,7 +58,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Func<ReaderOptions, Task> saveReaderOptions,
         ReaderOptions readerOptions,
         PipelineOptions pipelineOptions,
-        PassageOptions passageOptions)
+        PassageOptions passageOptions,
+        DatabaseSettingsViewModel banco)
     {
         _repository = repository;
         _pipelineFactory = pipelineFactory;
@@ -67,6 +68,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _pipelineOptions = pipelineOptions;
         Cadastro = new TagCatalogViewModel(catalog, CaptureForCatalogAsync);
         Movimentacoes = new StockMovementsViewModel(repository);
+        Banco = banco;
 
         Protocols = protocolFactory.AvailableProtocols.ToArray();
         ReaderModels = readerModels.Models;
@@ -201,6 +203,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     }
 
     public StockMovementsViewModel Movimentacoes { get; }
+
+    public DatabaseSettingsViewModel Banco { get; }
 
     // ───────────────────────── Consulta ─────────────────────────
 

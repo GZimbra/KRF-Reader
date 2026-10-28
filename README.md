@@ -3,22 +3,22 @@
 
   <h1>《 KRF Reader — Controle de entrada e saída de estoque por RFID UHF 》</h1>
 
-  <p>Aplicação desktop em C# / .NET 8 com interface Avalonia 11. Lê tags RFID UHF num portal (doca, porta de almoxarifado), aplica a direção escolhida pelo operador e mantém o status de cada tag em SQLite. O driver do leitor é desacoplado do fabricante.</p>
+  <p>Aplicação desktop em C# / .NET 8 com interface Avalonia 11. Lê tags RFID UHF num portal (doca, porta de almoxarifado), aplica a direção escolhida pelo operador e mantém o status de cada tag em SQLite ou SQL Server (Power BI ao vivo por DirectQuery). O driver do leitor é desacoplado do fabricante.</p>
 
   <p>
     <img src="https://img.shields.io/badge/.NET-8.0-512BD4?style=flat-square&amp;logo=dotnet&amp;logoColor=white" alt=".NET 8" />
     <img src="https://img.shields.io/badge/UI-Avalonia%2011.3-FFA600?style=flat-square" alt="Avalonia 11.3" />
-    <img src="https://img.shields.io/badge/Banco-SQLite%20%2B%20Dapper-003B57?style=flat-square&amp;logo=sqlite&amp;logoColor=white" alt="SQLite com Dapper" />
+    <img src="https://img.shields.io/badge/Banco-SQLite%20%7C%20SQL%20Server%20%2B%20Dapper-003B57?style=flat-square&amp;logo=sqlite&amp;logoColor=white" alt="SQLite ou SQL Server com Dapper" />
     <img src="https://img.shields.io/badge/Leitor-R200%20%7C%20Serial%20%7C%20TCP-191919?style=flat-square" alt="Leitor R200, Serial ou TCP" />
     <img src="https://img.shields.io/badge/Plataformas-Windows%20%7C%20Linux%20%7C%20macOS-555555?style=flat-square" alt="Windows, Linux e macOS" />
-    <img src="https://img.shields.io/badge/Testes-263%20casos%20xUnit-2E7D32?style=flat-square" alt="263 casos de teste xUnit" />
+    <img src="https://img.shields.io/badge/Testes-310%20casos%20xUnit-2E7D32?style=flat-square" alt="310 casos de teste xUnit" />
   </p>
 </div>
 
 > [!WARNING]
 > O app não tem modo simulado: ele sobe conectando no leitor **R200** (COM3, 115200, 915–928 MHz). Com o R200 real
 > foram validados identificação, potência, região/canais, início e parada do inventário. **A leitura de tags com
-> hardware real nunca foi validada**: o leitor foi testado sem antena. O pipeline foi coberto por 263 testes
+> hardware real nunca foi validada**: o leitor foi testado sem antena. O pipeline foi coberto por 310 testes
 > automatizados, que usam um simulador que só existe no projeto de testes.
 > UHF lê fora da zona de interesse; o software mitiga leituras fantasma, mas não resolve. Leia
 > [Limitações físicas do UHF](#limitações-físicas-do-uhf) antes de instalar.
@@ -33,6 +33,7 @@
   - [Regras de negócio](#regras-de-negócio)
   - [Cadastro de tags](#cadastro-de-tags)
   - [Banco de dados](#banco-de-dados)
+  - [Power BI em tempo real](#power-bi-em-tempo-real)
   - [Pipeline de leituras](#pipeline-de-leituras)
   - [Leitura de muitas tags (passagem)](#leitura-de-muitas-tags-passagem)
   - [Leitor real](#leitor-real)
@@ -57,7 +58,8 @@ O **KRF Reader** controla entrada e saída de estoque num portal RFID UHF. O ope
 - **PARAR:** encerra o inventário e grava o que já foi lido no modo vigente.
 
 A tag carrega apenas o EPC. Toda a lógica de estoque fica no sistema e no banco. Não há servidor, nuvem ou
-telemetria: o app fala só com o leitor (serial ou TCP) e com o SQLite local.
+telemetria: o app fala só com o leitor (serial ou TCP) e com o banco: SQLite local (padrão) ou SQL Server
+(opcional, para o Power BI ler ao vivo).
 
 ## Módulos
 
@@ -66,8 +68,8 @@ telemetria: o app fala só com o leitor (serial ou TCP) e com o SQLite local.
 | Interface | `KrfReader.UI` | Avalonia 11 (MVVM): abas Operação, Consulta, Cadastro e Configuração. Composition root e `appsettings.json`. |
 | Domínio | `KrfReader.Domain` | Regra pura (`InventoryRules.Decide`, `TagRegistrationRules`), enums, `TagRead`, `Epc`. Sem dependências. |
 | Aplicação | `KrfReader.Application` | Contratos (`IRfidReader`, `IReaderProtocol`, `IInventoryRepository`, `ITagCatalogRepository`, `IInventoryPipeline`), options e pipeline concorrente. |
-| Infraestrutura | `KrfReader.Infrastructure` | Drivers de leitor (Serial, TCP), protocolos plugáveis e repositório SQLite. |
-| Testes | `tests/KrfReader.Tests` | xUnit: domínio, dedup, troca de modo, idempotência, anomalia, SQLite, parser, ponta a ponta. |
+| Infraestrutura | `KrfReader.Infrastructure` | Drivers de leitor (Serial, TCP), protocolos plugáveis e repositórios SQLite e SQL Server. |
+| Testes | `tests/KrfReader.Tests` | xUnit: domínio, dedup, troca de modo, idempotência, anomalia, SQLite e SQL Server (mesma suíte), parser, ponta a ponta. |
 
 ### Mapa do código
 
@@ -75,8 +77,9 @@ telemetria: o app fala só com o leitor (serial ou TCP) e com o SQLite local.
 KRF-Reader/
 ├── KrfReader.sln
 ├── Directory.Build.props              # net8.0, nullable, implicit usings
-├── Directory.Packages.props           # versões centralizadas (Avalonia 11.3.22, Dapper, Sqlite)
-├── db/migrations/                     # NNNN_nome.sql: migrações versionadas (embutidas e aplicadas no start)
+├── Directory.Packages.props           # versões centralizadas (Avalonia 11.3.22, Dapper, Sqlite, SqlClient)
+├── db/migrations/                     # NNNN_nome.sql: migrações SQLite (embutidas e aplicadas no start)
+│   └── sqlserver/                     # NNNN_nome.sql: migrações SQL Server (sequência própria)
 ├── docs/screenshots/                  # telas usadas neste README
 ├── src/
 │   ├── KrfReader.Domain/              # InventoryRules, TagRegistration, Epc, TagRead, TagState, InventoryEvent, DbLiterals
@@ -86,7 +89,7 @@ KRF-Reader/
 │   │   ├── Pipeline/                  # InventoryPipeline, Deduplicator, ReadFilter, ModeState, PassageTracker, PassageMonitor
 │   │   └── Readers/                   # IRfidReader, IReaderProtocol, IRfidReaderFactory, InventoryTuning (Gen2)
 │   ├── KrfReader.Infrastructure/
-│   │   ├── Persistence/               # SqliteInventoryRepository (Dapper, upsert em lote), SchemaMigrator
+│   │   ├── Persistence/               # Sqlite/SqlServerInventoryRepository, BatchPlanner, migradores
 │   │   └── Readers/                   # GenericSerialReader, GenericTcpReader, Protocols/ (R200/M100, R2000, AsciiLine)
 │   └── KrfReader.UI/                  # App, MainWindow, ViewModels, CompositionRoot, Assets
 └── tests/KrfReader.Tests/             # Domain, Pipeline, Persistence, Readers, Integration, Fakes
@@ -108,6 +111,9 @@ KRF-Reader/
 | [Persistence/SqliteInventoryRepository.Catalog.cs](src/KrfReader.Infrastructure/Persistence/SqliteInventoryRepository.Catalog.cs) | CRUD de `TagCadastro` e consulta de tags cadastradas com status e última detecção. |
 | [Persistence/SqliteInventoryRepository.Movements.cs](src/KrfReader.Infrastructure/Persistence/SqliteInventoryRepository.Movements.cs) | Consulta de movimentações com filtros e gravação de passagens. |
 | [Persistence/SchemaMigrator.cs](src/KrfReader.Infrastructure/Persistence/SchemaMigrator.cs) | Migrações por `PRAGMA user_version`, uma transação por migração. |
+| [Persistence/BatchPlanner.cs](src/KrfReader.Infrastructure/Persistence/BatchPlanner.cs) | Decisão do lote independente de banco: estado atual → `InventoryRules.Decide` → linhas de upsert e de evento. |
+| [Persistence/SqlServerInventoryRepository.cs](src/KrfReader.Infrastructure/Persistence/SqlServerInventoryRepository.cs) | Mesmo contrato sobre SQL Server: cria o banco, liga `READ_COMMITTED_SNAPSHOT`, aplica migrações, grava o lote. |
+| [Persistence/SqlServerSchemaMigrator.cs](src/KrfReader.Infrastructure/Persistence/SqlServerSchemaMigrator.cs) | Migrações SQL Server versionadas em `dbo.SchemaVersao`, com `sp_getapplock` e lotes separados por `GO`. |
 | [UI/CompositionRoot.cs](src/KrfReader.UI/CompositionRoot.cs) | Monta configuração, factories, repositório e pipeline. |
 
 ## Projeto
@@ -132,6 +138,9 @@ KRF-Reader/
   <br/><br/>
   <img src="docs/screenshots/configuracao.png" width="820" alt="KRF Reader: aba Configuração" />
   <br/><sub>Configuração do leitor e do filtro de leituras</sub>
+  <br/><br/>
+  <img src="docs/screenshots/banco-sqlserver.png" width="820" alt="KRF Reader: card Banco de dados com SQL Server" />
+  <br/><sub>Banco de dados: SQL Server Express testado e dados para o Power BI (senha ocultada)</sub>
 </div>
 
 <br/>
@@ -148,11 +157,12 @@ antena, RSSI e a passagem que a contém. Totais de entradas, saídas e anomalias
 tag no leitor. A lista mostra status atual (DENTRO, FORA, NUNCA LIDA) e última detecção com antena e RSSI. Detalhes em
 [Cadastro de tags](#cadastro-de-tags).
 
-**CONFIGURAÇÃO.** Duas partes:
+**CONFIGURAÇÃO.** Quatro partes:
 
 - *Leitor RFID*: tipo (Serial, Tcp), porta serial e baud, host e porta TCP, protocolo, potência e antenas ativas. Só vale após **Aplicar leitor**, que desconecta e reconecta. Exige modo PARADO.
 - *Filtro de leituras*: RSSI mínimo e antenas aceitas. Vale na hora, sem reconectar.
 - *Anticolisão · muitas tags*: session Gen2, target (A fixo ou A↔B), duração da rodada, Q inicial, Q dinâmico e prefixo de Select. Vale ao aplicar o leitor.
+- *Banco de dados*: SQLite ou SQL Server e a connection string. **Testar conexão** abre o servidor e diz se o banco já existe; **Salvar banco** grava em `appsettings.Local.json` e vale na próxima abertura. Mostra servidor e banco a digitar no Power BI. Ver [Power BI em tempo real](#power-bi-em-tempo-real).
 
 Fechar a janela com modo ativo grava as leituras pendentes antes de sair ("Encerrando...").
 
@@ -188,7 +198,9 @@ Tabela `TagCadastro`, separada de `Tags`.
 
 ### Banco de dados
 
-SQLite (`krf-reader.db`). Datas gravadas em UTC (`yyyy-MM-ddTHH:mm:ss.fffZ`); a UI mostra no fuso local.
+SQLite (`krf-reader.db`, padrão) ou SQL Server (opcional, ver [Power BI em tempo real](#power-bi-em-tempo-real)). Mesmas
+tabelas, views e regras nos dois. Datas em UTC: no SQLite como texto `yyyy-MM-ddTHH:mm:ss.fffZ`, no SQL Server como
+`DATETIME2(3)`; a UI mostra no fuso local.
 
 | Objeto | Tipo | Conteúdo |
 |---|---|---|
@@ -214,9 +226,72 @@ desfaz tudo e o banco continua na versão anterior. Banco da v0.4 (versão 0) re
 adiciona colunas, tabela e views sem perder dados; antena e RSSI da última detecção são preenchidos a partir do último
 evento quando ele coincide com `UltimaLeitura`. Banco com versão maior que a do executável é recusado.
 
+No SQL Server a sequência é própria (`db/migrations/sqlserver/`, [SqlServerSchemaMigrator](src/KrfReader.Infrastructure/Persistence/SqlServerSchemaMigrator.cs)):
+a `0001` cria de uma vez o schema equivalente ao SQLite v2. A versão fica em `dbo.SchemaVersao`; cada migração roda numa
+transação com `sp_getapplock`, então duas instâncias abrindo juntas não migram em paralelo. Mudança de schema exige
+arquivo novo nas duas pastas.
+
 > [!CAUTION]
 > Não edite migração já publicada. Mudança de schema = novo arquivo com o próximo número. Não há downgrade: faça cópia
-> do `.db` antes de atualizar o executável.
+> do `.db` (ou backup do banco SQL Server) antes de atualizar o executável.
+
+### Power BI em tempo real
+
+SQLite não serve para BI ao vivo: o Power BI só **importa** o arquivo via ODBC, com atualização manual ou agendada.
+Para o painel acompanhar a doca, o KRF Reader grava em **SQL Server** e o Power BI conecta em **DirectQuery**: cada
+visual consulta o banco na hora, sem cópia. SQL Server **Express** é gratuito (limite de 10 GB por banco, suficiente
+para dezenas de milhões de movimentações).
+
+1. **Instalar o SQL Server Express** (instalação *Básica*). A instância padrão é `localhost\SQLEXPRESS` e o usuário do
+   Windows que instalou é administrador dela.
+2. **Apontar o app.** Aba *Configurações* → *Banco de dados* → `SQL Server`. A connection string padrão já serve para a
+   instalação acima:
+   `Server=localhost\SQLEXPRESS;Database=KrfReader;Integrated Security=True;Encrypt=True;TrustServerCertificate=True`.
+   **Testar conexão**, **Salvar banco**, fechar e abrir o app. Na abertura ele cria o banco `KrfReader`, liga
+   `READ_COMMITTED_SNAPSHOT` e aplica as migrações.
+3. **Conectar o Power BI Desktop.** *Obter dados* → *SQL Server* → Servidor `localhost\SQLEXPRESS`, Banco `KrfReader`,
+   modo **DirectQuery** → credencial *Windows* → marcar `Movimentacoes`, `TagsCadastradas`, `Passagens` (e `Tags`, se
+   quiser também tag lida sem cadastro).
+4. **Atualização automática.** No relatório: *Formatar página* → *Atualização de página* → ligar e definir o intervalo
+   (ex.: 5 s). Sem isso o DirectQuery só consulta ao abrir, filtrar ou clicar em *Atualizar*.
+
+| Objeto | Uso no BI |
+|---|---|
+| `Movimentacoes` | Fato: uma linha por movimentação. `DataHora` (UTC), `DataHoraLocal` (Brasília), `Tipo` (ENTRADA/SAIDA), `Evento`, `Anomalia` (bit), `PassagemId` |
+| `TagsCadastradas` | Dimensão de item com status atual: `Status` (DENTRO/FORA/nulo), `UltimaDeteccao`, `UltimaDeteccaoLocal` |
+| `Passagens` | Qualidade de leitura: veredito, tags, leituras, rodadas por passagem |
+| `Tags` | Estado de toda tag lida, cadastrada ou não |
+
+<details>
+<summary><b>Medidas DAX de partida</b></summary>
+
+<br/>
+
+```DAX
+Estoque atual   = CALCULATE(COUNTROWS(TagsCadastradas), TagsCadastradas[Status] = "DENTRO")
+Entradas hoje   = CALCULATE(COUNTROWS(Movimentacoes), Movimentacoes[Tipo] = "ENTRADA",
+                    Movimentacoes[DataHoraLocal] >= TODAY())
+Saídas hoje     = CALCULATE(COUNTROWS(Movimentacoes), Movimentacoes[Tipo] = "SAIDA",
+                    Movimentacoes[DataHoraLocal] >= TODAY())
+Anomalias       = CALCULATE(COUNTROWS(Movimentacoes), Movimentacoes[Anomalia] = TRUE())
+```
+
+Relacionamento: `Movimentacoes[EpcId]` → `TagsCadastradas[EpcId]` (muitos para um).
+
+</details>
+
+> [!WARNING]
+> - **Power BI Service (web).** O relatório publicado precisa do *On-premises data gateway* (gratuito) numa máquina
+>   que alcance o SQL Server. Em workspace Pro, a atualização automática de página tem intervalo mínimo de **30 min**;
+>   intervalos de segundos só em capacidade Premium/Fabric. Tempo real de segundos, sem custo, é no **Power BI Desktop**.
+> - **Outro computador.** Power BI em outra máquina exige TCP/IP habilitado no *SQL Server Configuration Manager*,
+>   serviço *SQL Server Browser* ativo (instância nomeada) e firewall liberado (TCP 1433, UDP 1434).
+> - **Credencial do BI.** Para gateway ou acesso remoto, crie um login só de leitura em vez de usar o administrador:
+>   `CREATE LOGIN krf_bi WITH PASSWORD = '...'; USE KrfReader; CREATE USER krf_bi FOR LOGIN krf_bi;`
+>   `ALTER ROLE db_datareader ADD MEMBER krf_bi;` (exige autenticação mista habilitada no servidor).
+> - **Fuso.** As colunas `*Local` usam `E. South America Standard Time` (UTC−3, fixo na migração). As colunas UTC são
+>   as indexadas; filtre por elas em tabelas grandes.
+> - **Troca de banco não migra dados.** Ao passar de SQLite para SQL Server o estoque começa vazio.
 
 ### Pipeline de leituras
 
@@ -338,13 +413,13 @@ O resto (pipeline, banco, UI) não muda.
 
 ### Trocar o banco
 
-Implemente `IInventoryRepository` (ex.: `PostgresInventoryRepository`) e escolha pela `Database.Provider` no composition root. O algoritmo de `ApplyBatchAsync` (carregar estado → `InventoryRules.Decide` → upsert → inserir eventos, numa transação) é o mesmo:
+SQLite e SQL Server já existem (`Database.Provider`). Outro banco = implementar `IInventoryRepository` e
+`ITagCatalogRepository`, registrar em [CompositionRoot](src/KrfReader.UI/CompositionRoot.cs) e criar a pasta de
+migrações. A decisão do lote já é comum ([BatchPlanner](src/KrfReader.Infrastructure/Persistence/BatchPlanner.cs)): o
+repositório só carrega o estado dos EPCs e grava o plano numa transação.
 
-- PostgreSQL: `INSERT ... ON CONFLICT (EpcId) DO UPDATE`, igual ao SQLite. Para lotes grandes, use `COPY` para uma tabela temporária e depois `INSERT ... SELECT`.
-- SQL Server: `MERGE` ou TVP + `MERGE`. Use `DATETIME2` e `IDENTITY`.
-
-Notas de tipo estão em `db/migrations/0001_inicial.sql`. As views `TagsCadastradas` e `Movimentacoes` são SQL padrão;
-`PRAGMA user_version` vira uma tabela de versão.
+- PostgreSQL: `INSERT ... ON CONFLICT (EpcId) DO UPDATE`, igual ao SQLite. Datas `TIMESTAMPTZ`.
+- Testes: herdar as suítes `InventoryRepositoryContract`, `TagCatalogContract` e `MovementsAndRegisteredTagsContract`.
 
 ### Limitações físicas do UHF
 
@@ -364,11 +439,11 @@ Notas de tipo estão em `db/migrations/0001_inicial.sql`. As views `TagsCadastra
 | --- | --- |
 | Linguagem e runtime | C# (`LangVersion` latest), .NET 8, `Nullable` |
 | Interface | Avalonia 11.3 (Fluent, fonte Inter) + CommunityToolkit.Mvvm 8.4 |
-| Persistência | SQLite (Microsoft.Data.Sqlite 8.0) + Dapper 2.1 |
+| Persistência | SQLite (Microsoft.Data.Sqlite 8.0) ou SQL Server 2016+ / Express (Microsoft.Data.SqlClient 6.0) + Dapper 2.1 |
 | Leitor | System.IO.Ports 8.0 (serial), `TcpClient` (rede), protocolos plugáveis |
 | Concorrência | `System.Threading.Channels` (bounded) |
 | Configuração | Microsoft.Extensions.Configuration (JSON) + DependencyInjection + Logging |
-| Testes | xUnit 2.9 + Microsoft.Extensions.TimeProvider.Testing |
+| Testes | xUnit 2.9 + Xunit.SkippableFact + Microsoft.Extensions.TimeProvider.Testing |
 | Distribuição | `dotnet publish` single-file, self-contained |
 
 ## Como Rodar
@@ -384,7 +459,7 @@ Notas de tipo estão em `db/migrations/0001_inicial.sql`. As views `TagsCadastra
 ```bash
 git clone https://github.com/GZimbra/KRF-Reader.git && cd KRF-Reader
 dotnet run  --project src/KrfReader.UI        # conecta no R200 (COM3)
-dotnet test KrfReader.sln                     # 263 casos de teste, sem hardware e sem rede
+dotnet test KrfReader.sln                     # 310 casos; os 39 de SQL Server pulam sem KRF_TEST_SQLSERVER
 dotnet publish src/KrfReader.UI -c Release -r win-x64   --self-contained -p:PublishSingleFile=true -o publish/win-x64
 dotnet publish src/KrfReader.UI -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true -o publish/linux-x64
 ```
@@ -426,7 +501,8 @@ Fontes (a última vence): `src/KrfReader.UI/appsettings.json` → `appsettings.L
 | | `StableRounds` | Rodadas sem EPC novo para convergir (3) |
 | | `MaxEstimatedMissed` | Limite do estimador Chao2 para CONFIÁVEL (0,5) |
 | | `MarginalRssiMarginDb` | Margem acima do `MinRssi` que marca tag marginal (6 dB) |
-| `Database` | `Provider` / `ConnectionString` | Hoje só `Sqlite` |
+| `Database` | `Provider` | `Sqlite` (padrão) ou `SqlServer` |
+| | `ConnectionString` | SQLite: `Data Source=krf-reader.db`. SQL Server: precisa de `Database=`; o banco é criado se não existir |
 
 ### Testes
 
@@ -434,10 +510,20 @@ Fontes (a última vence): `src/KrfReader.UI/appsettings.json` → `appsettings.L
 |---|---|
 | `Domain/` | `InventoryRules.Decide` (tabela completa), normalização de EPC, validação do cadastro, literais do banco |
 | `Pipeline/` | Deduplicação por geração, filtro RSSI/antena, troca de modo, barreira de PARAR, shutdown, concorrência do estado de modo, captura para cadastro |
-| `Persistence/` | `SqliteInventoryRepository` contra SQLite real: criação, mudança de status, idempotência, anomalia, lote de 2000 leituras, consultas, cadastro de tags, migrações (banco v0.4, rollback, versão futura), tags cadastradas, movimentações e passagens |
+| `Persistence/` | Mesma suíte (contratos) contra SQLite real e SQL Server real; mais migrador SQL Server, precisão de data, views do BI. SQLite: criação, mudança de status, idempotência, anomalia, lote de 2000 leituras, consultas, cadastro de tags, migrações (banco v0.4, rollback, versão futura), tags cadastradas, movimentações e passagens |
 | `Readers/` | Parser `AsciiLine` (frames parciais, lixo), factory de protocolos, MockReader (fake de teste), comandos Gen2 do M100 e troca de parâmetros pelo transporte |
 | `Passage/` | Convergência, Chao2, silêncio, perda de dados; 50–100 tags no simulador Gen2 com Monte Carlo (400 passagens) |
 | `Integration/` | Ponta a ponta: leitor fake → pipeline → SQLite |
+
+Os testes de SQL Server rodam quando `KRF_TEST_SQLSERVER` aponta para um servidor (sem `Database`); cada teste cria e
+apaga um banco `KrfTest_<guid>`. Sem a variável eles aparecem como *Skipped*, não como aprovados. No CI rodam contra o
+container `mcr.microsoft.com/mssql/server:2022-latest` (Express). Local:
+
+```bash
+docker run -d --name krf-mssql -e ACCEPT_EULA=Y -e MSSQL_PID=Express -e 'MSSQL_SA_PASSWORD=<senha forte>' -p 1433:1433 \
+  mcr.microsoft.com/mssql/server:2022-latest
+KRF_TEST_SQLSERVER='Server=localhost,1433;User Id=sa;Password=<senha forte>;TrustServerCertificate=True' dotnet test
+```
 
 ### Contribuição
 
@@ -448,6 +534,19 @@ Fontes (a última vence): `src/KrfReader.UI/appsettings.json` → `appsettings.L
 5. Configuração local fica em `appsettings.Local.json`, nunca no `appsettings.json` versionado.
 
 ## Decisões e Desafios
+
+<details>
+<summary><b>SQL Server como segundo banco, não substituto</b></summary>
+
+<br/>
+
+O pedido era BI em tempo real. SQLite não tem DirectQuery no Power BI, só importação. Trocar o banco padrão obrigaria
+toda instalação a ter SQL Server, inclusive bancada e teste de campo. A escolha foi manter SQLite como padrão e
+adicionar SQL Server como provider selecionável, com a mesma suíte de testes rodando nos dois e a regra do lote
+extraída para um único lugar (`BatchPlanner`). Custo: schema em duas pastas de migração, e trocar de banco não copia os
+dados existentes. `READ_COMMITTED_SNAPSHOT` é ligado para o BI não bloquear o lote de gravação.
+
+</details>
 
 <details>
 <summary><b>Garantia de leitura: medir em vez de prometer</b></summary>

@@ -1,6 +1,7 @@
 using Avalonia;
 using Avalonia.Controls.ApplicationLifetimes;
 using Avalonia.Markup.Xaml;
+using KrfReader.Infrastructure.Persistence;
 using KrfReader.UI.ViewModels;
 using KrfReader.UI.Views;
 
@@ -27,7 +28,11 @@ public partial class App : Avalonia.Application
                 options => ReaderSettingsStore.SaveAsync(options),
                 _root.ReaderOptions,
                 _root.PipelineOptions,
-                _root.PassageOptions);
+                _root.PassageOptions,
+                new DatabaseSettingsViewModel(
+                    _root.DatabaseOptions,
+                    options => ReaderSettingsStore.SaveAsync(options),
+                    DatabaseConnectionTester.TestAsync));
 
             desktop.MainWindow = new MainWindow { DataContext = viewModel };
             desktop.Exit += (_, _) => _root?.Dispose();

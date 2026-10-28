@@ -17,7 +17,7 @@ internal static class SchemaMigrator
 {
     internal const string ResourcePrefix = "KrfReader.Infrastructure.migrations.";
 
-    private static readonly Lazy<IReadOnlyList<Migration>> Embedded = new(LoadEmbedded);
+    private static readonly Lazy<IReadOnlyList<Migration>> Embedded = new(() => LoadEmbedded(ResourcePrefix));
 
     public static IReadOnlyList<Migration> Migrations => Embedded.Value;
 
@@ -65,12 +65,12 @@ internal static class SchemaMigrator
         connection.ExecuteScalarAsync<int>(new CommandDefinition("PRAGMA user_version;", transaction: transaction, cancellationToken: cancellationToken));
 
     /// <summary>Lê e valida os recursos: versões 1..N contíguas, sem repetição.</summary>
-    internal static IReadOnlyList<Migration> Parse(IEnumerable<(string ResourceName, string Sql)> resources)
+    internal static IReadOnlyList<Migration> Parse(IEnumerable<(string ResourceName, string Sql)> resources, string prefix = ResourcePrefix)
     {
         var list = new List<Migration>();
         foreach (var (resourceName, sql) in resources)
         {
-            var fileName = resourceName[ResourcePrefix.Length..];
+            var fileName = resourceName[prefix.Length..];
             var separator = fileName.IndexOf('_', StringComparison.Ordinal);
             if (separator <= 0 || !int.TryParse(fileName[..separator], NumberStyles.None, CultureInfo.InvariantCulture, out var version))
                 throw new InvalidOperationException($"Nome de migração inválido: '{fileName}' (esperado NNNN_nome.sql).");
@@ -89,17 +89,18 @@ internal static class SchemaMigrator
         return list;
     }
 
-    private static IReadOnlyList<Migration> LoadEmbedded()
+    /// <summary>Migrações embutidas com o prefixo dado (SQLite: <see cref="ResourcePrefix"/>; SQL Server: <see cref="SqlServerSchemaMigrator.ResourcePrefix"/>).</summary>
+    internal static IReadOnlyList<Migration> LoadEmbedded(string prefix)
     {
         var assembly = typeof(SchemaMigrator).Assembly;
         var resources = assembly.GetManifestResourceNames()
-            .Where(n => n.StartsWith(ResourcePrefix, StringComparison.Ordinal) && n.EndsWith(".sql", StringComparison.Ordinal))
+            .Where(n => n.StartsWith(prefix, StringComparison.Ordinal) && n.EndsWith(".sql", StringComparison.Ordinal))
             .Select(n =>
             {
                 using var stream = assembly.GetManifestResourceStream(n)!;
                 using var reader = new StreamReader(stream);
                 return (n, reader.ReadToEnd());
             });
-        return Parse(resources);
+        return Parse(resources, prefix);
     }
 }

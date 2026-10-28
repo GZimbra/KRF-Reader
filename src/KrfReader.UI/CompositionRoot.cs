@@ -39,12 +39,22 @@ public sealed class CompositionRoot : IDisposable
             });
         });
 
-        if (!string.Equals(databaseOptions.Provider, "Sqlite", StringComparison.OrdinalIgnoreCase))
-            throw new NotSupportedException($"Database:Provider '{databaseOptions.Provider}' não suportado (apenas Sqlite).");
-
-        var sqlite = new SqliteInventoryRepository(databaseOptions, LoggerFactory.CreateLogger<SqliteInventoryRepository>());
-        Repository = sqlite;
-        Catalog = sqlite;
+        switch (DatabaseProviders.Normalize(databaseOptions.Provider))
+        {
+            case DatabaseProviders.Sqlite:
+                var sqlite = new SqliteInventoryRepository(databaseOptions, LoggerFactory.CreateLogger<SqliteInventoryRepository>());
+                Repository = sqlite;
+                Catalog = sqlite;
+                break;
+            case DatabaseProviders.SqlServer:
+                var sqlServer = new SqlServerInventoryRepository(databaseOptions, LoggerFactory.CreateLogger<SqlServerInventoryRepository>());
+                Repository = sqlServer;
+                Catalog = sqlServer;
+                break;
+            default:
+                throw new NotSupportedException(
+                    $"Database:Provider '{databaseOptions.Provider}' não suportado ({string.Join(", ", DatabaseProviders.All)}).");
+        }
         ProtocolFactory = new ReaderProtocolFactory();
         _readerFactory = new RfidReaderFactory(ProtocolFactory, LoggerFactory);
     }

@@ -924,6 +924,50 @@
                   </Grid>
                 </StackPanel>
               </c:HudBorder>
+
+              <!-- Banco de dados: vale na próxima abertura -->
+              <c:HudBorder Classes="card" Padding="20,16" DataContext="{Binding Banco}" x:DataType="vm:DatabaseSettingsViewModel">
+                <StackPanel Spacing="10">
+                  <DockPanel>
+                    <TextBlock DockPanel.Dock="Right" Classes="label" VerticalAlignment="Center" Text="VALE NA PRÓXIMA ABERTURA" />
+                    <TextBlock Classes="sectionTitle" Text="BANCO DE DADOS" />
+                  </DockPanel>
+                  <TextBlock Classes="hint" TextWrapping="Wrap"
+                             Text="SQLite = arquivo local, zero instalação. SQL Server (Express é gratuito) = Power BI ao vivo por DirectQuery. Trocar não copia os dados do banco anterior." />
+
+                  <Grid ColumnDefinitions="150,*" Margin="0,4,0,0">
+                    <TextBlock Classes="field" Text="PROVIDER" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                      <ComboBox Width="300" ItemsSource="{Binding ProviderLabels}" SelectedIndex="{Binding ProviderIndex}" />
+                      <Border Classes="tag ok">
+                        <TextBlock Text="{Binding ActiveText}" />
+                      </Border>
+                    </StackPanel>
+                  </Grid>
+
+                  <Grid ColumnDefinitions="150,*">
+                    <TextBlock Classes="field" Text="CONNECTION STRING" />
+                    <TextBox Grid.Column="1" Classes="mono" TextWrapping="Wrap" AcceptsReturn="False"
+                             Text="{Binding ConnectionString}" />
+                  </Grid>
+
+                  <TextBlock Classes="hint" TextWrapping="Wrap" IsVisible="{Binding IsSqlServer}"
+                             Text="Prefira Integrated Security=True (login do Windows): senha de usuário SQL ficaria em texto puro no appsettings.Local.json." />
+
+                  <Border Classes="screen" Padding="12,8">
+                    <TextBlock Classes="mono" FontSize="12" TextWrapping="Wrap" Text="{Binding PowerBiText}" />
+                  </Border>
+
+                  <Border Height="1" Background="{StaticResource HairlineBrush}" Margin="0,6" />
+
+                  <StackPanel Orientation="Horizontal" Spacing="10">
+                    <Button Content="TESTAR CONEXÃO" Classes="ghost" Command="{Binding TestCommand}" />
+                    <Button Content="SALVAR BANCO" Classes="accent" Command="{Binding SaveCommand}" />
+                  </StackPanel>
+                  <TextBlock Classes="mono muted" FontSize="12" TextWrapping="Wrap"
+                             Text="{Binding Message}" Classes.error="{Binding MessageIsError}" />
+                </StackPanel>
+              </c:HudBorder>
             </StackPanel>
 
             <!-- Ficha técnica + guia de troca -->

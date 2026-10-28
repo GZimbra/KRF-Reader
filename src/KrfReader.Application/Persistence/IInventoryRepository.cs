@@ -4,7 +4,7 @@ using KrfReader.Domain;
 namespace KrfReader.Application.Persistence;
 
 /// <summary>
-/// Acesso a dados do estoque. Trocar SQLite por SQL Server/PostgreSQL = nova implementação desta interface.
+/// Acesso a dados do estoque. Implementações: SQLite e SQL Server (Infrastructure/Persistence); outro banco = nova implementação.
 /// Toda regra de transição vem de <see cref="InventoryRules"/>; o repositório só aplica.
 /// </summary>
 public interface IInventoryRepository

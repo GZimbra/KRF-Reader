@@ -11,14 +11,14 @@
     <img src="https://img.shields.io/badge/Banco-SQLite%20%2B%20Dapper-003B57?style=flat-square&amp;logo=sqlite&amp;logoColor=white" alt="SQLite com Dapper" />
     <img src="https://img.shields.io/badge/Leitor-R200%20%7C%20Serial%20%7C%20TCP-191919?style=flat-square" alt="Leitor R200, Serial ou TCP" />
     <img src="https://img.shields.io/badge/Plataformas-Windows%20%7C%20Linux%20%7C%20macOS-555555?style=flat-square" alt="Windows, Linux e macOS" />
-    <img src="https://img.shields.io/badge/Testes-238%20casos%20xUnit-2E7D32?style=flat-square" alt="238 casos de teste xUnit" />
+    <img src="https://img.shields.io/badge/Testes-263%20casos%20xUnit-2E7D32?style=flat-square" alt="263 casos de teste xUnit" />
   </p>
 </div>
 
 > [!WARNING]
 > O app não tem modo simulado: ele sobe conectando no leitor **R200** (COM3, 115200, 915–928 MHz). Com o R200 real
 > foram validados identificação, potência, região/canais, início e parada do inventário. **A leitura de tags com
-> hardware real nunca foi validada**: o leitor foi testado sem antena. O pipeline foi coberto por 238 testes
+> hardware real nunca foi validada**: o leitor foi testado sem antena. O pipeline foi coberto por 263 testes
 > automatizados, que usam um simulador que só existe no projeto de testes.
 > UHF lê fora da zona de interesse; o software mitiga leituras fantasma, mas não resolve. Leia
 > [Limitações físicas do UHF](#limitações-físicas-do-uhf) antes de instalar.
@@ -32,6 +32,7 @@
   - [Interface gráfica](#interface-gráfica)
   - [Regras de negócio](#regras-de-negócio)
   - [Cadastro de tags](#cadastro-de-tags)
+  - [Banco de dados](#banco-de-dados)
   - [Pipeline de leituras](#pipeline-de-leituras)
   - [Leitura de muitas tags (passagem)](#leitura-de-muitas-tags-passagem)
   - [Leitor real](#leitor-real)
@@ -75,7 +76,7 @@ KRF-Reader/
 ├── KrfReader.sln
 ├── Directory.Build.props              # net8.0, nullable, implicit usings
 ├── Directory.Packages.props           # versões centralizadas (Avalonia 11.3.22, Dapper, Sqlite)
-├── db/schema.sql                      # schema (também embutido e aplicado no start)
+├── db/migrations/                     # NNNN_nome.sql: migrações versionadas (embutidas e aplicadas no start)
 ├── docs/screenshots/                  # telas usadas neste README
 ├── src/
 │   ├── KrfReader.Domain/              # InventoryRules, TagRegistration, Epc, TagRead, TagState, InventoryEvent, DbLiterals
@@ -85,7 +86,7 @@ KRF-Reader/
 │   │   ├── Pipeline/                  # InventoryPipeline, Deduplicator, ReadFilter, ModeState, PassageTracker, PassageMonitor
 │   │   └── Readers/                   # IRfidReader, IReaderProtocol, IRfidReaderFactory, InventoryTuning (Gen2)
 │   ├── KrfReader.Infrastructure/
-│   │   ├── Persistence/               # SqliteInventoryRepository (Dapper, upsert em lote; cadastro em .Catalog.cs)
+│   │   ├── Persistence/               # SqliteInventoryRepository (Dapper, upsert em lote), SchemaMigrator
 │   │   └── Readers/                   # GenericSerialReader, GenericTcpReader, Protocols/ (R200/M100, R2000, AsciiLine)
 │   └── KrfReader.UI/                  # App, MainWindow, ViewModels, CompositionRoot, Assets
 └── tests/KrfReader.Tests/             # Domain, Pipeline, Persistence, Readers, Integration, Fakes
@@ -104,7 +105,9 @@ KRF-Reader/
 | [Readers/Protocols/AsciiLineProtocol.cs](src/KrfReader.Infrastructure/Readers/Protocols/AsciiLineProtocol.cs) | Parser `EPC,RSSI,ANTENA[,TIMESTAMP]` com frames parciais. |
 | [Fakes/MockReader.cs](tests/KrfReader.Tests/Fakes/MockReader.cs) | Simulador usado só nos testes: população de tags, entrada e saída do campo, rajadas e leituras fantasma. |
 | [Persistence/SqliteInventoryRepository.cs](src/KrfReader.Infrastructure/Persistence/SqliteInventoryRepository.cs) | Aplica o lote numa transação: carrega estado, decide, faz upsert e insere eventos. |
-| [Persistence/SqliteInventoryRepository.Catalog.cs](src/KrfReader.Infrastructure/Persistence/SqliteInventoryRepository.Catalog.cs) | CRUD de `TagCadastro` e consulta com descrição/SKU. |
+| [Persistence/SqliteInventoryRepository.Catalog.cs](src/KrfReader.Infrastructure/Persistence/SqliteInventoryRepository.Catalog.cs) | CRUD de `TagCadastro` e consulta de tags cadastradas com status e última detecção. |
+| [Persistence/SqliteInventoryRepository.Movements.cs](src/KrfReader.Infrastructure/Persistence/SqliteInventoryRepository.Movements.cs) | Consulta de movimentações com filtros e gravação de passagens. |
+| [Persistence/SchemaMigrator.cs](src/KrfReader.Infrastructure/Persistence/SchemaMigrator.cs) | Migrações por `PRAGMA user_version`, uma transação por migração. |
 | [UI/CompositionRoot.cs](src/KrfReader.UI/CompositionRoot.cs) | Monta configuração, factories, repositório e pipeline. |
 
 ## Projeto
@@ -121,8 +124,11 @@ KRF-Reader/
   <img src="docs/screenshots/consulta.png" width="820" alt="KRF Reader: aba Consulta" />
   <br/><sub>Consulta por EPC, descrição ou SKU</sub>
   <br/><br/>
+  <img src="docs/screenshots/movimentacoes.png" width="820" alt="KRF Reader: aba Movimentações" />
+  <br/><sub>Movimentações por período, tipo e EPC/item; anomalia em destaque</sub>
+  <br/><br/>
   <img src="docs/screenshots/cadastro.png" width="820" alt="KRF Reader: aba Cadastro" />
-  <br/><sub>Cadastro de tags: manual ou lendo a tag no leitor</sub>
+  <br/><sub>Cadastro de tags com status atual e última detecção</sub>
   <br/><br/>
   <img src="docs/screenshots/configuracao.png" width="820" alt="KRF Reader: aba Configuração" />
   <br/><sub>Configuração do leitor e do filtro de leituras</sub>
@@ -134,7 +140,13 @@ KRF-Reader/
 
 **CONSULTA.** Busca por trecho de EPC, descrição ou SKU. Mostra descrição do cadastro, status atual, última leitura e última mudança de cada tag.
 
-**CADASTRO.** Cadastra tags com descrição, SKU e observação, digitando o EPC ou lendo a tag no leitor. Detalhes em [Cadastro de tags](#cadastro-de-tags).
+**MOVIMENTAÇÕES.** Entradas e saídas gravadas no estoque. Filtros: período (DE/ATÉ, atalhos HOJE, 7 DIAS, 30 DIAS),
+tipo (ENTRADA, SAÍDA, ANOMALIA) e trecho de EPC, descrição ou SKU. Cada linha mostra data/hora local, item, evento,
+antena, RSSI e a passagem que a contém. Totais de entradas, saídas e anomalias do resultado no topo.
+
+**CADASTRO.** Cadastra tags com descrição, SKU, categoria, unidade, localização e observação, digitando o EPC ou lendo a
+tag no leitor. A lista mostra status atual (DENTRO, FORA, NUNCA LIDA) e última detecção com antena e RSSI. Detalhes em
+[Cadastro de tags](#cadastro-de-tags).
 
 **CONFIGURAÇÃO.** Duas partes:
 
@@ -164,7 +176,8 @@ Instrumentos da aba Operação: escala UHF com a faixa do leitor, osciloscópio 
 
 ### Cadastro de tags
 
-Aba **Cadastro**: associa ao EPC uma descrição (obrigatória), SKU e observação. Tabela `TagCadastro`, separada de `Tags`.
+Aba **Cadastro**: associa ao EPC uma descrição (obrigatória), SKU, categoria, unidade, localização e observação.
+Tabela `TagCadastro`, separada de `Tags`.
 
 - **Manual**: digite o EPC. Aceita espaços, `-` e `:`; exige hex com tamanho múltiplo de 4 dígitos (palavras de 16 bits do Gen2), de 4 a 124. EPC-96 = 24 dígitos.
 - **Ler tag**: liga o leitor por 1,5 s com o inventário **PARADO**, aplica o mesmo filtro de RSSI/antena e preenche o EPC de maior RSSI. Se houver mais de uma tag no campo, todas aparecem para escolha. Nada é gravado em `Tags`/`Eventos`. ENTRADA/SAÍDA ficam bloqueados durante a captura, e a captura é recusada com modo ativo.
@@ -172,6 +185,38 @@ Aba **Cadastro**: associa ao EPC uma descrição (obrigatória), SKU e observaç
 - Na **Consulta**, cada tag mostra a descrição (ou "não cadastrada"), a busca casa EPC, descrição ou SKU, e "Cadastro desta tag" abre a tag selecionada na aba Cadastro.
 
 **O cadastro não altera a regra de estoque.** Tag cadastrada e nunca lida em ENTRADA, quando lida em SAÍDA, continua sendo `SAIDA_SEM_ENTRADA`; tag não cadastrada lida em ENTRADA continua sendo criada como DENTRO. Ver [Decisões e Desafios](#decisões-e-desafios).
+
+### Banco de dados
+
+SQLite (`krf-reader.db`). Datas gravadas em UTC (`yyyy-MM-ddTHH:mm:ss.fffZ`); a UI mostra no fuso local.
+
+| Objeto | Tipo | Conteúdo |
+|---|---|---|
+| `TagCadastro` | tabela | EPC, descrição, SKU, categoria, unidade, localização, observação, cadastrado em, atualizado em |
+| `Tags` | tabela | Estado de toda tag já lida: status, última detecção (`UltimaLeitura`) com antena e RSSI, última mudança de status |
+| `Eventos` | tabela | Movimentações: EPC, modo, tipo (`CRIACAO`, `MUDANCA_STATUS`, `SAIDA_SEM_ENTRADA`), data/hora, antena, RSSI |
+| `Passagens` | tabela | Passagens fechadas do módulo de alta densidade: modo, início, fim, tags, leituras, rodadas, veredito |
+| `TagsCadastradas` | view | `TagCadastro` + status + última detecção. Tag nunca lida vem com status nulo |
+| `Movimentacoes` | view | `Eventos` + item do cadastro + id da passagem + flag `Anomalia` (saída sem entrada) |
+
+- **Mesma transação.** Cada lote grava os eventos e atualiza status, última detecção, antena e RSSI em `Tags` numa
+  única transação. A última detecção nunca retrocede: lote atrasado com leitura antiga não sobrescreve.
+- **Releitura não é movimentação.** Tag DENTRO lida em ENTRADA só atualiza a última detecção; não entra em `Eventos`.
+- **Passagem.** A movimentação é ligada à passagem pelo modo e pela janela de tempo (`Movimentacoes.PassagemId`). O id
+  é o do banco; o número mostrado ao vivo na aba Operação reinicia a cada execução e não é o mesmo.
+- **Índices.** `Eventos (EpcId, Timestamp)`, `Eventos (Timestamp)`, `Eventos (Modo, Timestamp)`, `Eventos (Tipo)`,
+  `Tags (Status)`, `Tags (UltimaLeitura)`, `TagCadastro (Sku)`, `Passagens (Modo, InicioUtc)`.
+
+**Migrações.** Arquivos `db/migrations/NNNN_nome.sql`, embutidos no assembly e aplicados no start por
+[SchemaMigrator](src/KrfReader.Infrastructure/Persistence/SchemaMigrator.cs). A versão do banco fica em
+`PRAGMA user_version`. Cada migração roda uma vez, em transação `IMMEDIATE`, junto com a nova versão: falha no meio
+desfaz tudo e o banco continua na versão anterior. Banco da v0.4 (versão 0) recebe a `0001` como no-op e a `0002`
+adiciona colunas, tabela e views sem perder dados; antena e RSSI da última detecção são preenchidos a partir do último
+evento quando ele coincide com `UltimaLeitura`. Banco com versão maior que a do executável é recusado.
+
+> [!CAUTION]
+> Não edite migração já publicada. Mudança de schema = novo arquivo com o próximo número. Não há downgrade: faça cópia
+> do `.db` antes de atualizar o executável.
 
 ### Pipeline de leituras
 
@@ -298,7 +343,8 @@ Implemente `IInventoryRepository` (ex.: `PostgresInventoryRepository`) e escolha
 - PostgreSQL: `INSERT ... ON CONFLICT (EpcId) DO UPDATE`, igual ao SQLite. Para lotes grandes, use `COPY` para uma tabela temporária e depois `INSERT ... SELECT`.
 - SQL Server: `MERGE` ou TVP + `MERGE`. Use `DATETIME2` e `IDENTITY`.
 
-Notas de tipo estão em `db/schema.sql`.
+Notas de tipo estão em `db/migrations/0001_inicial.sql`. As views `TagsCadastradas` e `Movimentacoes` são SQL padrão;
+`PRAGMA user_version` vira uma tabela de versão.
 
 ### Limitações físicas do UHF
 
@@ -338,14 +384,13 @@ Notas de tipo estão em `db/schema.sql`.
 ```bash
 git clone https://github.com/GZimbra/KRF-Reader.git && cd KRF-Reader
 dotnet run  --project src/KrfReader.UI        # conecta no R200 (COM3)
-dotnet test KrfReader.sln                     # 238 casos de teste, sem hardware e sem rede
+dotnet test KrfReader.sln                     # 263 casos de teste, sem hardware e sem rede
 dotnet publish src/KrfReader.UI -c Release -r win-x64   --self-contained -p:PublishSingleFile=true -o publish/win-x64
 dotnet publish src/KrfReader.UI -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true -o publish/linux-x64
 ```
 
 Com o leitor conectado: clique em **ENTRADA**, passe as tags e veja os contadores mudarem, depois **PARAR**. O banco
-`krf-reader.db` é criado no diretório de execução, com o schema aplicado no start (manual:
-`sqlite3 krf-reader.db < db/schema.sql`). Em produção, aponte `Database.ConnectionString` para um caminho absoluto
+`krf-reader.db` é criado no diretório de execução, com as migrações aplicadas no start. Em produção, aponte `Database.ConnectionString` para um caminho absoluto
 com permissão de escrita. `appsettings.json` já vai na saída do publish.
 
 ### Configuração
@@ -389,7 +434,7 @@ Fontes (a última vence): `src/KrfReader.UI/appsettings.json` → `appsettings.L
 |---|---|
 | `Domain/` | `InventoryRules.Decide` (tabela completa), normalização de EPC, validação do cadastro, literais do banco |
 | `Pipeline/` | Deduplicação por geração, filtro RSSI/antena, troca de modo, barreira de PARAR, shutdown, concorrência do estado de modo, captura para cadastro |
-| `Persistence/` | `SqliteInventoryRepository` contra SQLite real: criação, mudança de status, idempotência, anomalia, lote de 2000 leituras, consultas, cadastro de tags e migração de banco antigo |
+| `Persistence/` | `SqliteInventoryRepository` contra SQLite real: criação, mudança de status, idempotência, anomalia, lote de 2000 leituras, consultas, cadastro de tags, migrações (banco v0.4, rollback, versão futura), tags cadastradas, movimentações e passagens |
 | `Readers/` | Parser `AsciiLine` (frames parciais, lixo), factory de protocolos, MockReader (fake de teste), comandos Gen2 do M100 e troca de parâmetros pelo transporte |
 | `Passage/` | Convergência, Chao2, silêncio, perda de dados; 50–100 tags no simulador Gen2 com Monte Carlo (400 passagens) |
 | `Integration/` | Ponta a ponta: leitor fake → pipeline → SQLite |
@@ -479,6 +524,19 @@ por mudarem o comportamento em operação: (a) bloquear ou sinalizar como anomal
 (exige novo `Tipo` em `Eventos`, cujo `CHECK` obriga recriar a tabela no SQLite); (b) cadastrar já com status inicial
 DENTRO, para que a primeira SAÍDA de tag cadastrada vire `MUDANCA_STATUS`. Esta última falsifica `UltimaLeitura` (a tag
 nunca foi lida) e por isso foi evitada.
+
+</details>
+
+<details>
+<summary><b>Tags cadastradas e movimentações como views</b></summary>
+
+<br/>
+
+`Tags` guarda o estado de toda tag lida, inclusive sem cadastro; `TagCadastro` guarda só o dado mestre; `Eventos` já é o
+histórico de movimentações. Copiar status para `TagCadastro` ou eventos para outra tabela criaria duas fontes da verdade
+que divergem no primeiro erro. As views `TagsCadastradas` e `Movimentacoes` entregam "uma linha por item" e "uma linha
+por movimentação" sem duplicar dado. Anomalia continua sendo tipo de evento (`SAIDA_SEM_ENTRADA`), não status: um status
+ANOMALIA exigiria regra para a leitura seguinte da tag e mudaria `InventoryRules.Decide`.
 
 </details>
 

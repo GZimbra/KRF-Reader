@@ -14,13 +14,30 @@ public sealed record TagRegistration(
     string? Sku,
     string? Observacao,
     DateTime CadastradoEmUtc,
-    DateTime AtualizadoEmUtc);
+    DateTime AtualizadoEmUtc,
+    string? Categoria = null,
+    string? Unidade = null,
+    string? Localizacao = null);
 
 /// <summary>Dados informados pelo operador. Validados e normalizados por <see cref="TagRegistrationRules.Validate"/>.</summary>
-public sealed record TagRegistrationInput(string? Epc, string? Descricao, string? Sku, string? Observacao);
+public sealed record TagRegistrationInput(
+    string? Epc,
+    string? Descricao,
+    string? Sku,
+    string? Observacao,
+    string? Categoria = null,
+    string? Unidade = null,
+    string? Localizacao = null);
 
 /// <summary>Entrada já validada: EPC normalizado, textos aparados, opcionais vazios viram null.</summary>
-public sealed record ValidTagRegistration(string Epc, string Descricao, string? Sku, string? Observacao);
+public sealed record ValidTagRegistration(
+    string Epc,
+    string Descricao,
+    string? Sku,
+    string? Observacao,
+    string? Categoria = null,
+    string? Unidade = null,
+    string? Localizacao = null);
 
 /// <summary>Validação do cadastro. Pura, sem I/O.</summary>
 public static class TagRegistrationRules
@@ -34,6 +51,9 @@ public static class TagRegistrationRules
     public const int MaxDescricaoLength = 200;
     public const int MaxSkuLength = 64;
     public const int MaxObservacaoLength = 500;
+    public const int MaxCategoriaLength = 64;
+    public const int MaxUnidadeLength = 16;
+    public const int MaxLocalizacaoLength = 100;
 
     /// <summary>
     /// Valida e normaliza. O EPC aceita espaços, '-' e ':' como separadores (<see cref="KrfReader.Domain.Epc.Normalize"/>)
@@ -88,7 +108,28 @@ public static class TagRegistrationRules
             return false;
         }
 
-        result = new ValidTagRegistration(epc, descricao, sku, observacao);
+        var categoria = NullIfEmpty(input.Categoria);
+        if (categoria is { Length: > MaxCategoriaLength })
+        {
+            error = $"Categoria com mais de {MaxCategoriaLength} caracteres.";
+            return false;
+        }
+
+        var unidade = NullIfEmpty(input.Unidade);
+        if (unidade is { Length: > MaxUnidadeLength })
+        {
+            error = $"Unidade com mais de {MaxUnidadeLength} caracteres.";
+            return false;
+        }
+
+        var localizacao = NullIfEmpty(input.Localizacao);
+        if (localizacao is { Length: > MaxLocalizacaoLength })
+        {
+            error = $"Localização com mais de {MaxLocalizacaoLength} caracteres.";
+            return false;
+        }
+
+        result = new ValidTagRegistration(epc, descricao, sku, observacao, categoria, unidade, localizacao);
         error = "";
         return true;
     }

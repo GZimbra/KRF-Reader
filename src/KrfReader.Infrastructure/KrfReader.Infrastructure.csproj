@@ -8,7 +8,7 @@
     <PackageReference Include="System.IO.Ports" />
   </ItemGroup>
   <ItemGroup>
-    <EmbeddedResource Include="..\..\db\schema.sql" LogicalName="KrfReader.Infrastructure.schema.sql" />
+    <EmbeddedResource Include="..\..\db\migrations\*.sql" LogicalName="KrfReader.Infrastructure.migrations.%(Filename)%(Extension)" />
   </ItemGroup>
   <ItemGroup>
     <InternalsVisibleTo Include="KrfReader.Tests" />

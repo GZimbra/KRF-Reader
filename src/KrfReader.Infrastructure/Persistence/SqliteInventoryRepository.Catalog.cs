@@ -5,11 +5,11 @@ using KrfReader.Domain;
 
 namespace KrfReader.Infrastructure.Persistence;
 
-/// <summary><see cref="ITagCatalogRepository"/>: tabela <c>TagCadastro</c>.</summary>
+/// <summary><see cref="ITagCatalogRepository"/>: tabela <c>TagCadastro</c> e view <c>TagsCadastradas</c>.</summary>
 public sealed partial class SqliteInventoryRepository
 {
     private const string SelectRegistrationColumns =
-        "SELECT EpcId, Descricao, Sku, Observacao, CadastradoEm, AtualizadoEm FROM TagCadastro";
+        "SELECT EpcId, Descricao, Sku, Observacao, Categoria, Unidade, Localizacao, CadastradoEm, AtualizadoEm FROM TagCadastro";
 
     public async Task<bool> AddRegistrationAsync(TagRegistrationInput input, CancellationToken cancellationToken = default)
     {
@@ -18,8 +18,8 @@ public sealed partial class SqliteInventoryRepository
 
         // ON CONFLICT DO NOTHING: duplicado vira "0 linhas" em vez de exceção de PK, sem corrida entre SELECT e INSERT.
         const string sql = """
-            INSERT INTO TagCadastro (EpcId, Descricao, Sku, Observacao, CadastradoEm, AtualizadoEm)
-            VALUES (@EpcId, @Descricao, @Sku, @Observacao, @Now, @Now)
+            INSERT INTO TagCadastro (EpcId, Descricao, Sku, Observacao, Categoria, Unidade, Localizacao, CadastradoEm, AtualizadoEm)
+            VALUES (@EpcId, @Descricao, @Sku, @Observacao, @Categoria, @Unidade, @Localizacao, @Now, @Now)
             ON CONFLICT (EpcId) DO NOTHING
             """;
 
@@ -30,6 +30,9 @@ public sealed partial class SqliteInventoryRepository
             valid.Descricao,
             valid.Sku,
             valid.Observacao,
+            valid.Categoria,
+            valid.Unidade,
+            valid.Localizacao,
             Now = now,
         }, cancellationToken: cancellationToken)).ConfigureAwait(false);
 
@@ -43,7 +46,8 @@ public sealed partial class SqliteInventoryRepository
         var valid = TagRegistrationRules.Validate(input);
         const string sql = """
             UPDATE TagCadastro
-            SET Descricao = @Descricao, Sku = @Sku, Observacao = @Observacao, AtualizadoEm = @Now
+            SET Descricao = @Descricao, Sku = @Sku, Observacao = @Observacao,
+                Categoria = @Categoria, Unidade = @Unidade, Localizacao = @Localizacao, AtualizadoEm = @Now
             WHERE EpcId = @EpcId
             """;
 
@@ -54,6 +58,9 @@ public sealed partial class SqliteInventoryRepository
             valid.Descricao,
             valid.Sku,
             valid.Observacao,
+            valid.Categoria,
+            valid.Unidade,
+            valid.Localizacao,
             Now = DbTimestamp.ToDb(DateTime.UtcNow),
         }, cancellationToken: cancellationToken)).ConfigureAwait(false);
         return rows == 1;
@@ -115,16 +122,80 @@ public sealed partial class SqliteInventoryRepository
         return rows.Select(r => r.ToDomain()).ToList();
     }
 
-    private sealed record RegistrationRow
+    public async Task<IReadOnlyList<RegisteredTag>> QueryRegisteredTagsAsync(
+        string? term, RegisteredTagStatusFilter status = RegisteredTagStatusFilter.Todos, int limit = 500,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit <= 0)
+            return [];
+
+        var statusCondition = status switch
+        {
+            RegisteredTagStatusFilter.Todos => "1 = 1",
+            RegisteredTagStatusFilter.Dentro or RegisteredTagStatusFilter.Fora => "Status = @Status",
+            RegisteredTagStatusFilter.NuncaLida => "Status IS NULL",
+            _ => throw new ArgumentOutOfRangeException(nameof(status)),
+        };
+        var trimmed = string.IsNullOrWhiteSpace(term) ? null : term.Trim();
+        // Nunca lidas (UltimaDeteccao NULL) no fim; SQLite ordena NULL primeiro em DESC sem o IS NULL.
+        var sql = $$"""
+            SELECT EpcId, Descricao, Sku, Observacao, Categoria, Unidade, Localizacao, CadastradoEm, AtualizadoEm,
+                   Status, UltimaDeteccao, UltimaAntenaId, UltimaRssi
+            FROM TagsCadastradas
+            WHERE {{statusCondition}}
+              AND (@Pattern IS NULL
+                   OR EpcId LIKE @Pattern ESCAPE '\'
+                   OR Descricao LIKE @Pattern ESCAPE '\'
+                   OR Sku LIKE @Pattern ESCAPE '\'
+                   OR Categoria LIKE @Pattern ESCAPE '\'
+                   OR Localizacao LIKE @Pattern ESCAPE '\')
+            ORDER BY UltimaDeteccao IS NULL, UltimaDeteccao DESC, EpcId
+            LIMIT @Limit
+            """;
+
+        await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        var rows = await connection.QueryAsync<RegisteredTagRow>(new CommandDefinition(sql, new
+        {
+            Status = status switch
+            {
+                RegisteredTagStatusFilter.Dentro => TagStatus.Dentro.ToDb(),
+                RegisteredTagStatusFilter.Fora => TagStatus.Fora.ToDb(),
+                _ => null,
+            },
+            Pattern = trimmed is null ? null : "%" + EscapeLike(trimmed) + "%",
+            Limit = limit,
+        }, cancellationToken: cancellationToken)).ConfigureAwait(false);
+
+        return rows.Select(r => new RegisteredTag(
+            r.ToDomain(),
+            r.Status is null ? null : DbLiterals.ParseStatus(r.Status),
+            r.UltimaDeteccao is null ? null : DbTimestamp.FromDb(r.UltimaDeteccao),
+            r.UltimaAntenaId is { } antena ? checked((int)antena) : null,
+            r.UltimaRssi)).ToList();
+    }
+
+    private record RegistrationRow
     {
         public string EpcId { get; init; } = "";
         public string Descricao { get; init; } = "";
         public string? Sku { get; init; }
         public string? Observacao { get; init; }
+        public string? Categoria { get; init; }
+        public string? Unidade { get; init; }
+        public string? Localizacao { get; init; }
         public string CadastradoEm { get; init; } = "";
         public string AtualizadoEm { get; init; } = "";
 
         public TagRegistration ToDomain() => new(
-            EpcId, Descricao, Sku, Observacao, DbTimestamp.FromDb(CadastradoEm), DbTimestamp.FromDb(AtualizadoEm));
+            EpcId, Descricao, Sku, Observacao, DbTimestamp.FromDb(CadastradoEm), DbTimestamp.FromDb(AtualizadoEm),
+            Categoria, Unidade, Localizacao);
+    }
+
+    private sealed record RegisteredTagRow : RegistrationRow
+    {
+        public string? Status { get; init; }
+        public string? UltimaDeteccao { get; init; }
+        public long? UltimaAntenaId { get; init; }
+        public double? UltimaRssi { get; init; }
     }
 }

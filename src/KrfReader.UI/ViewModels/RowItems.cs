@@ -79,5 +79,27 @@ public sealed class EventRowItem(InventoryEvent ev)
     public bool IsAnomaly { get; } = ev.IsAnomaly;
 }
 
+/// <summary>Linha da aba Movimentações.</summary>
+public sealed class MovementRowItem(StockMovement m)
+{
+    public string Time { get; } = Display.LocalTime(m.DataHoraUtc, "dd/MM/yyyy HH:mm:ss");
+    public string Tipo { get; } = Display.Mode(m.Tipo);
+    public bool IsEntrada { get; } = m.Tipo == OperationMode.Entrada;
+    public string Epc { get; } = m.Epc;
+    public string Item { get; } = m.Descricao is null ? "não cadastrada" : m.Sku is null ? m.Descricao : $"{m.Sku} · {m.Descricao}";
+    public bool IsRegistered { get; } = m.Descricao is not null;
+    public string Evento { get; } = m.Evento switch
+    {
+        EventType.Criacao => "1ª entrada",
+        EventType.MudancaStatus => m.Tipo == OperationMode.Entrada ? "→ DENTRO" : "→ FORA",
+        EventType.SaidaSemEntrada => "⚠ SAÍDA SEM ENTRADA",
+        _ => m.Evento.ToString(),
+    };
+    public int Antenna { get; } = m.AntennaId;
+    public string Rssi { get; } = Display.Rssi(m.Rssi);
+    public string Passagem { get; } = m.PassagemId is { } id ? $"#{id}" : "—";
+    public bool IsAnomaly { get; } = m.IsAnomaly;
+}
+
 /// <summary>Linha da ficha técnica do modelo de leitor (Configurações).</summary>
 public sealed record SpecItem(string Label, string Value);

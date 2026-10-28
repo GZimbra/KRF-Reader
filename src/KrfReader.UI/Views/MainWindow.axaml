@@ -60,6 +60,9 @@
       <Setter Property="Foreground" Value="{StaticResource SaidaTextBrush}" />
       <Setter Property="FontWeight" Value="Bold" />
     </Style>
+    <Style Selector="TextBlock.status.nunca">
+      <Setter Property="Foreground" Value="{StaticResource DimTextBrush}" />
+    </Style>
     <Style Selector="TextBlock.status.dentro">
       <Setter Property="Foreground" Value="{StaticResource EntradaTextBrush}" />
     </Style>
@@ -522,8 +525,84 @@
         </Grid>
       </TabItem>
 
+      <!-- ═══════════════════════ MOVIMENTAÇÕES ═══════════════════════ -->
+      <TabItem Header="03 MOVIMENTAÇÕES">
+        <Grid RowDefinitions="Auto,Auto,*" RowSpacing="10" DataContext="{Binding Movimentacoes}" x:DataType="vm:StockMovementsViewModel">
+          <Border Grid.Row="0" Classes="card" Padding="14,10">
+            <WrapPanel Orientation="Horizontal" ItemSpacing="10" LineSpacing="8">
+              <TextBlock Classes="field" Text="DE" VerticalAlignment="Center" />
+              <CalendarDatePicker Width="150" SelectedDate="{Binding FromDate}" SelectedDateFormat="Short" />
+              <TextBlock Classes="field" Text="ATÉ" VerticalAlignment="Center" />
+              <CalendarDatePicker Width="150" SelectedDate="{Binding ToDate}" SelectedDateFormat="Short" />
+              <Button Classes="ghost" Content="HOJE" Command="{Binding TodayCommand}" />
+              <Button Classes="ghost" Content="7 DIAS" Command="{Binding Last7DaysCommand}" />
+              <Button Classes="ghost" Content="30 DIAS" Command="{Binding Last30DaysCommand}" />
+              <TextBlock Classes="field" Text="TIPO" Margin="8,0,0,0" VerticalAlignment="Center" />
+              <ComboBox Width="130" ItemsSource="{Binding TipoOptions}" SelectedIndex="{Binding TipoIndex}" />
+              <TextBlock Classes="field" Text="BUSCA" Margin="8,0,0,0" VerticalAlignment="Center" />
+              <TextBox Width="260" Text="{Binding SearchText}" Watermark="EPC, descrição ou SKU">
+                <TextBox.KeyBindings>
+                  <KeyBinding Gesture="Enter" Command="{Binding SearchCommand}" />
+                </TextBox.KeyBindings>
+              </TextBox>
+              <Button Content="BUSCAR" Command="{Binding SearchCommand}" Classes="accent" />
+            </WrapPanel>
+          </Border>
+
+          <DockPanel Grid.Row="1">
+            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Spacing="16" VerticalAlignment="Center">
+              <TextBlock Classes="mono" FontSize="12" Foreground="{StaticResource EntradaTextBrush}"
+                         Text="{Binding CountEntradas, StringFormat='ENTRADAS {0}'}" />
+              <TextBlock Classes="mono" FontSize="12" Foreground="{StaticResource SaidaTextBrush}"
+                         Text="{Binding CountSaidas, StringFormat='SAÍDAS {0}'}" />
+              <TextBlock Classes="mono" FontSize="12" Foreground="{StaticResource BrandOrangeBrush}"
+                         Text="{Binding CountAnomalias, StringFormat='ANOMALIAS {0}'}" />
+            </StackPanel>
+            <TextBlock Classes="mono muted" FontSize="12" VerticalAlignment="Center" Text="{Binding Message}"
+                       Classes.error="{Binding MessageIsError}" />
+          </DockPanel>
+
+          <Border Grid.Row="2" Classes="card" Padding="0">
+            <Grid RowDefinitions="Auto,*">
+              <Border Grid.Row="0" Classes="tableHeader">
+                <Grid ColumnDefinitions="170,90,2*,2*,170,50,70,80">
+                  <TextBlock Grid.Column="0" Classes="header" Text="DATA/HORA" />
+                  <TextBlock Grid.Column="1" Classes="header" Text="TIPO" />
+                  <TextBlock Grid.Column="2" Classes="header" Text="EPC" />
+                  <TextBlock Grid.Column="3" Classes="header" Text="ITEM" />
+                  <TextBlock Grid.Column="4" Classes="header" Text="EVENTO" />
+                  <TextBlock Grid.Column="5" Classes="header" Text="ANT" />
+                  <TextBlock Grid.Column="6" Classes="header" Text="RSSI" />
+                  <TextBlock Grid.Column="7" Classes="header" Text="PASSAGEM" />
+                </Grid>
+              </Border>
+              <ListBox Grid.Row="1" Classes="compact" ItemsSource="{Binding Movements}">
+                <ListBox.ItemTemplate>
+                  <DataTemplate x:DataType="vm:MovementRowItem">
+                    <Border Classes="row" Classes.anomaly="{Binding IsAnomaly}">
+                      <Grid ColumnDefinitions="170,90,2*,2*,170,50,70,80">
+                        <TextBlock Grid.Column="0" Classes="muted" Text="{Binding Time}" />
+                        <TextBlock Grid.Column="1" Classes="status" Classes.dentro="{Binding IsEntrada}" Text="{Binding Tipo}" />
+                        <TextBlock Grid.Column="2" Text="{Binding Epc}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
+                        <TextBlock Grid.Column="3" Text="{Binding Item}" Classes.dim="{Binding !IsRegistered}"
+                                   FontFamily="{StaticResource ContentControlThemeFontFamily}" FontSize="13"
+                                   TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
+                        <TextBlock Grid.Column="4" Text="{Binding Evento}" TextTrimming="CharacterEllipsis" />
+                        <TextBlock Grid.Column="5" Text="{Binding Antenna}" />
+                        <TextBlock Grid.Column="6" Text="{Binding Rssi}" />
+                        <TextBlock Grid.Column="7" Classes="muted" Text="{Binding Passagem}" />
+                      </Grid>
+                    </Border>
+                  </DataTemplate>
+                </ListBox.ItemTemplate>
+              </ListBox>
+            </Grid>
+          </Border>
+        </Grid>
+      </TabItem>
+
       <!-- ═══════════════════════ CADASTRO ═══════════════════════ -->
-      <TabItem Header="03 CADASTRO">
+      <TabItem Header="04 CADASTRO">
         <Grid ColumnDefinitions="420,*" ColumnSpacing="10" DataContext="{Binding Cadastro}" x:DataType="vm:TagCatalogViewModel">
 
           <!-- Formulário -->
@@ -566,6 +645,20 @@
                 <TextBlock Classes="label" Text="SKU / CÓDIGO DO ITEM" Margin="0,6,0,0" />
                 <TextBox Classes="mono" Text="{Binding Sku}" MaxLength="64" Watermark="opcional" />
 
+                <Grid ColumnDefinitions="*,110" ColumnSpacing="8" Margin="0,6,0,0">
+                  <StackPanel Grid.Column="0" Spacing="4">
+                    <TextBlock Classes="label" Text="CATEGORIA" />
+                    <TextBox Text="{Binding Categoria}" MaxLength="64" Watermark="opcional" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Spacing="4">
+                    <TextBlock Classes="label" Text="UNIDADE" />
+                    <TextBox Classes="mono" Text="{Binding Unidade}" MaxLength="16" Watermark="UN, CX, PL" />
+                  </StackPanel>
+                </Grid>
+
+                <TextBlock Classes="label" Text="LOCALIZAÇÃO" Margin="0,6,0,0" />
+                <TextBox Text="{Binding Localizacao}" MaxLength="100" Watermark="ex.: Rua A · Prateleira 3" />
+
                 <TextBlock Classes="label" Text="OBSERVAÇÃO" Margin="0,6,0,0" />
                 <TextBox Text="{Binding Observacao}" MaxLength="500" AcceptsReturn="True" TextWrapping="Wrap"
                          Height="80" Watermark="opcional" />
@@ -590,8 +683,10 @@
                 <TextBlock DockPanel.Dock="Right" Classes="mono muted" FontSize="12" VerticalAlignment="Center"
                            Text="{Binding ListMessage}" />
                 <StackPanel Orientation="Horizontal" Spacing="10">
-                  <TextBlock Classes="field" Text="BUSCA" />
-                  <TextBox Width="320" Text="{Binding SearchText}" Watermark="EPC, descrição ou SKU">
+                  <TextBlock Classes="field" Text="STATUS" />
+                  <ComboBox Width="140" ItemsSource="{Binding StatusFilterOptions}" SelectedIndex="{Binding StatusFilterIndex}" />
+                  <TextBlock Classes="field" Text="BUSCA" Margin="8,0,0,0" />
+                  <TextBox Width="260" Text="{Binding SearchText}" Watermark="EPC, item, categoria, local">
                     <TextBox.KeyBindings>
                       <KeyBinding Gesture="Enter" Command="{Binding SearchCommand}" />
                     </TextBox.KeyBindings>
@@ -604,11 +699,13 @@
             <Border Grid.Row="1" Classes="card" Padding="0">
               <Grid RowDefinitions="Auto,*">
                 <Border Grid.Row="0" Classes="tableHeader">
-                  <Grid ColumnDefinitions="2*,2*,*,130">
+                  <Grid ColumnDefinitions="2*,2*,*,*,100,170">
                     <TextBlock Grid.Column="0" Classes="header" Text="EPC" />
                     <TextBlock Grid.Column="1" Classes="header" Text="DESCRIÇÃO" />
                     <TextBlock Grid.Column="2" Classes="header" Text="SKU" />
-                    <TextBlock Grid.Column="3" Classes="header" Text="ATUALIZADO" />
+                    <TextBlock Grid.Column="3" Classes="header" Text="LOCAL" />
+                    <TextBlock Grid.Column="4" Classes="header" Text="STATUS" />
+                    <TextBlock Grid.Column="5" Classes="header" Text="ÚLTIMA DETECÇÃO" />
                   </Grid>
                 </Border>
                 <ListBox Grid.Row="1" Classes="compact" ItemsSource="{Binding Registrations}"
@@ -616,12 +713,20 @@
                   <ListBox.ItemTemplate>
                     <DataTemplate x:DataType="vm:TagRegistrationItem">
                       <Border Classes="row">
-                        <Grid ColumnDefinitions="2*,2*,*,130">
+                        <Grid ColumnDefinitions="2*,2*,*,*,100,170">
                           <TextBlock Grid.Column="0" Text="{Binding Epc}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
                           <TextBlock Grid.Column="1" Text="{Binding Descricao}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"
                                      FontFamily="{StaticResource ContentControlThemeFontFamily}" FontSize="13" />
                           <TextBlock Grid.Column="2" Text="{Binding Sku}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
-                          <TextBlock Grid.Column="3" Classes="muted" Text="{Binding AtualizadoEm}" />
+                          <TextBlock Grid.Column="3" Text="{Binding Local}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"
+                                     FontFamily="{StaticResource ContentControlThemeFontFamily}" FontSize="13" />
+                          <TextBlock Grid.Column="4" Classes="status" Classes.dentro="{Binding IsDentro}"
+                                     Classes.nunca="{Binding IsNeverDetected}" Text="{Binding Status}" />
+                          <StackPanel Grid.Column="5" VerticalAlignment="Center">
+                            <TextBlock Classes="muted" Text="{Binding UltimaDeteccao}" />
+                            <TextBlock Classes="dim" FontSize="10" Text="{Binding UltimaDeteccaoDetalhe}"
+                                       IsVisible="{Binding !IsNeverDetected}" />
+                          </StackPanel>
                         </Grid>
                       </Border>
                     </DataTemplate>
@@ -634,7 +739,7 @@
       </TabItem>
 
       <!-- ═══════════════════════ CONFIGURAÇÕES ═══════════════════════ -->
-      <TabItem Header="04 CONFIGURAÇÕES">
+      <TabItem Header="05 CONFIGURAÇÕES">
         <ScrollViewer>
           <Grid ColumnDefinitions="*,400" ColumnSpacing="10">
             <StackPanel Grid.Column="0" Spacing="10">

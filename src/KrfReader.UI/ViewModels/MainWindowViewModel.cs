@@ -66,6 +66,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _baseReaderOptions = readerOptions;
         _pipelineOptions = pipelineOptions;
         Cadastro = new TagCatalogViewModel(catalog, CaptureForCatalogAsync);
+        Movimentacoes = new StockMovementsViewModel(repository);
 
         Protocols = protocolFactory.AvailableProtocols.ToArray();
         ReaderModels = readerModels.Models;
@@ -183,9 +184,23 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     // ───────────────────────── Abas ─────────────────────────
 
-    public const int CadastroTabIndex = 2;
+    public const int MovimentacoesTabIndex = 2;
+    public const int CadastroTabIndex = 3;
 
     [ObservableProperty] private int _selectedTabIndex;
+
+    // Recarrega ao abrir: as listas refletem leituras feitas na aba Operação.
+    partial void OnSelectedTabIndexChanged(int value)
+    {
+        if (!_repositoryReady)
+            return;
+        if (value == MovimentacoesTabIndex)
+            _ = Movimentacoes.LoadAsync();
+        else if (value == CadastroTabIndex)
+            _ = Cadastro.LoadAsync();
+    }
+
+    public StockMovementsViewModel Movimentacoes { get; }
 
     // ───────────────────────── Consulta ─────────────────────────
 

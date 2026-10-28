@@ -17,8 +17,6 @@ namespace KrfReader.Infrastructure.Persistence;
 /// </summary>
 public sealed partial class SqliteInventoryRepository : IInventoryRepository, ITagCatalogRepository
 {
-    internal const string SchemaResourceName = "KrfReader.Infrastructure.schema.sql";
-
     /// <summary>Limite de parâmetros por SELECT ... IN (...).</summary>
     internal const int InClauseChunkSize = 500;
 
@@ -28,12 +26,17 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
         "SELECT EpcId, Status FROM Tags WHERE EpcId IN @Epcs";
 
     // Status sempre recebe o estado final decidido em memória; UltimaAtualizacaoStatus só muda
-    // quando alguma leitura do lote mudou o status; UltimaLeitura nunca retrocede.
+    // quando alguma leitura do lote mudou o status; UltimaLeitura nunca retrocede, e antena/RSSI
+    // acompanham a leitura que define UltimaLeitura. No SET, Tags.* são os valores ANTES do update.
     private const string UpsertTagSql = """
-        INSERT INTO Tags (EpcId, Status, UltimaLeitura, UltimaAtualizacaoStatus)
-        VALUES (@EpcId, @Status, @UltimaLeitura, @UltimaAtualizacaoStatus)
+        INSERT INTO Tags (EpcId, Status, UltimaLeitura, UltimaAtualizacaoStatus, UltimaAntenaId, UltimaRssi)
+        VALUES (@EpcId, @Status, @UltimaLeitura, @UltimaAtualizacaoStatus, @UltimaAntenaId, @UltimaRssi)
         ON CONFLICT (EpcId) DO UPDATE SET
             UltimaLeitura = MAX(Tags.UltimaLeitura, excluded.UltimaLeitura),
+            UltimaAntenaId = CASE WHEN excluded.UltimaLeitura >= Tags.UltimaLeitura
+                THEN excluded.UltimaAntenaId ELSE Tags.UltimaAntenaId END,
+            UltimaRssi = CASE WHEN excluded.UltimaLeitura >= Tags.UltimaLeitura
+                THEN excluded.UltimaRssi ELSE Tags.UltimaRssi END,
             Status = CASE WHEN @StatusChanged = 1 THEN excluded.Status ELSE Tags.Status END,
             UltimaAtualizacaoStatus = CASE WHEN @StatusChanged = 1
                 THEN excluded.UltimaAtualizacaoStatus ELSE Tags.UltimaAtualizacaoStatus END
@@ -64,15 +67,14 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         EnsureDirectoryExists();
-        var schema = LoadSchema();
 
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
         var journalMode = await connection.ExecuteScalarAsync<string>(
             new CommandDefinition("PRAGMA journal_mode=WAL;", cancellationToken: cancellationToken)).ConfigureAwait(false);
-        await connection.ExecuteAsync(new CommandDefinition(schema, cancellationToken: cancellationToken)).ConfigureAwait(false);
+        var (from, to) = await SchemaMigrator.MigrateAsync(connection, _logger, cancellationToken).ConfigureAwait(false);
 
-        _logger.LogInformation("Banco SQLite inicializado ({DataSource}, journal_mode={JournalMode}).",
-            connection.DataSource, journalMode);
+        _logger.LogInformation("Banco SQLite inicializado ({DataSource}, journal_mode={JournalMode}, schema {From} → {To}).",
+            connection.DataSource, journalMode, from, to);
     }
 
     public async Task<BatchResult> ApplyBatchAsync(OperationMode mode, IReadOnlyList<TagRead> reads, CancellationToken cancellationToken = default)
@@ -114,12 +116,16 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
 
                 if (!pending.TryGetValue(epc, out var tag))
                 {
-                    tag = new PendingTag(timestamp);
+                    tag = new PendingTag(timestamp, read.AntennaId, read.Rssi);
                     pending[epc] = tag;
                 }
                 tag.Status = decision.NewStatus;
-                if (string.CompareOrdinal(timestamp, tag.UltimaLeitura) > 0)
+                if (string.CompareOrdinal(timestamp, tag.UltimaLeitura) >= 0)
+                {
                     tag.UltimaLeitura = timestamp;
+                    tag.UltimaAntenaId = read.AntennaId;
+                    tag.UltimaRssi = read.Rssi;
+                }
 
                 if (decision.Event is { } evt)
                 {
@@ -147,6 +153,8 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
                     UltimaLeitura = tag.UltimaLeitura,
                     // Para tag já existente sem mudança, o valor é ignorado pelo CASE do upsert.
                     UltimaAtualizacaoStatus = tag.UltimaAtualizacaoStatus ?? tag.UltimaLeitura,
+                    UltimaAntenaId = tag.UltimaAntenaId,
+                    UltimaRssi = tag.UltimaRssi,
                     StatusChanged = tag.StatusChanged ? 1 : 0,
                 });
             }
@@ -206,7 +214,8 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
         var term = string.IsNullOrWhiteSpace(search) ? null : search.Trim().ToUpperInvariant();
         // LEFT JOIN: tag lida sem cadastro aparece com Descricao/Sku nulos.
         var sql = """
-            SELECT t.EpcId, t.Status, t.UltimaLeitura, t.UltimaAtualizacaoStatus, c.Descricao, c.Sku
+            SELECT t.EpcId, t.Status, t.UltimaLeitura, t.UltimaAtualizacaoStatus, t.UltimaAntenaId, t.UltimaRssi,
+                   c.Descricao, c.Sku
             FROM Tags t
             LEFT JOIN TagCadastro c ON c.EpcId = t.EpcId
             WHERE (@Status IS NULL OR t.Status = @Status)
@@ -232,7 +241,9 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
             DbTimestamp.FromDb(r.UltimaLeitura),
             DbTimestamp.FromDb(r.UltimaAtualizacaoStatus),
             r.Descricao,
-            r.Sku)).ToList();
+            r.Sku,
+            r.UltimaAntenaId is { } antena ? checked((int)antena) : null,
+            r.UltimaRssi)).ToList();
     }
 
     public async Task<IReadOnlyList<InventoryEvent>> GetEventsAsync(string epc, int limit = 200, CancellationToken cancellationToken = default)
@@ -308,14 +319,6 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
             .Replace("%", @"\%", StringComparison.Ordinal)
             .Replace("_", @"\_", StringComparison.Ordinal);
 
-    private static string LoadSchema()
-    {
-        using var stream = typeof(SqliteInventoryRepository).Assembly.GetManifestResourceStream(SchemaResourceName)
-            ?? throw new InvalidOperationException($"Recurso embutido '{SchemaResourceName}' não encontrado.");
-        using var reader = new StreamReader(stream);
-        return reader.ReadToEnd();
-    }
-
     private void EnsureDirectoryExists()
     {
         var builder = new SqliteConnectionStringBuilder(_connectionString);
@@ -331,10 +334,12 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
             Directory.CreateDirectory(directory);
     }
 
-    private sealed class PendingTag(string firstTimestamp)
+    private sealed class PendingTag(string firstTimestamp, int antennaId, double rssi)
     {
         public TagStatus Status { get; set; }
         public string UltimaLeitura { get; set; } = firstTimestamp;
+        public int UltimaAntenaId { get; set; } = antennaId;
+        public double UltimaRssi { get; set; } = rssi;
         public string? UltimaAtualizacaoStatus { get; set; }
         public bool StatusChanged { get; set; }
     }
@@ -351,6 +356,8 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
         public string Status { get; init; } = "";
         public string UltimaLeitura { get; init; } = "";
         public string UltimaAtualizacaoStatus { get; init; } = "";
+        public long? UltimaAntenaId { get; init; }
+        public double? UltimaRssi { get; init; }
         public string? Descricao { get; init; }
         public string? Sku { get; init; }
     }
@@ -361,6 +368,8 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
         public string Status { get; init; } = "";
         public string UltimaLeitura { get; init; } = "";
         public string UltimaAtualizacaoStatus { get; init; } = "";
+        public int UltimaAntenaId { get; init; }
+        public double UltimaRssi { get; init; }
         public int StatusChanged { get; init; }
     }
 

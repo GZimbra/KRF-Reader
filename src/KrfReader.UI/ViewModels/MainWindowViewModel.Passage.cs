@@ -115,13 +115,31 @@ public sealed partial class MainWindowViewModel
                 ShowPassage(snapshot);
         });
 
-    private void OnPassageClosed(object? sender, PassageSnapshot snapshot) =>
+    private void OnPassageClosed(object? sender, PassageSnapshot snapshot)
+    {
+        _ = SavePassageAsync(snapshot);
         Dispatcher.UIThread.Post(() =>
         {
             ShowPassage(snapshot);
             if (snapshot.Verdict != PassageVerdict.Confiavel)
                 ReportError($"Passagem #{snapshot.Id}: {VerdictLabel(snapshot.Verdict)}. {string.Join(" ", snapshot.Issues)}");
         });
+    }
+
+    /// <summary>Grava a passagem fechada (vínculo das movimentações). Falha não interrompe a operação.</summary>
+    private async Task SavePassageAsync(PassageSnapshot snapshot)
+    {
+        if (snapshot.Mode is null || snapshot.DistinctTags == 0)
+            return;
+        try
+        {
+            await Task.Run(() => _repository.SavePassageAsync(snapshot));
+        }
+        catch (Exception ex)
+        {
+            Dispatcher.UIThread.Post(() => ReportError($"Falha ao gravar passagem #{snapshot.Id}: {ex.Message}"));
+        }
+    }
 
     private void ShowPassage(PassageSnapshot s)
     {

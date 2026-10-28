@@ -7,7 +7,8 @@ using KrfReader.Domain;
 namespace KrfReader.UI.ViewModels;
 
 /// <summary>
-/// Aba Cadastro: inclusão/edição/remoção de tags em <c>TagCadastro</c> e captura do EPC pelo leitor.
+/// Aba Cadastro: inclusão/edição/remoção de tags em <c>TagCadastro</c>, captura do EPC pelo leitor e
+/// lista das tags cadastradas com status atual e última detecção.
 /// A captura é delegada ao <see cref="MainWindowViewModel"/>, dono do ciclo de vida do pipeline.
 /// </summary>
 public sealed partial class TagCatalogViewModel : ObservableObject
@@ -38,6 +39,9 @@ public sealed partial class TagCatalogViewModel : ObservableObject
     [ObservableProperty] private string? _descricao;
     [ObservableProperty] private string? _sku;
     [ObservableProperty] private string? _observacao;
+    [ObservableProperty] private string? _categoria;
+    [ObservableProperty] private string? _unidade;
+    [ObservableProperty] private string? _localizacao;
     [ObservableProperty] private string? _formMessage;
     [ObservableProperty] private bool _formMessageIsError;
 
@@ -58,7 +62,7 @@ public sealed partial class TagCatalogViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanWork))]
     private async Task SaveAsync()
     {
-        var input = new TagRegistrationInput(Epc, Descricao, Sku, Observacao);
+        var input = new TagRegistrationInput(Epc, Descricao, Sku, Observacao, Categoria, Unidade, Localizacao);
         if (!TagRegistrationRules.TryValidate(input, out var valid, out var error))
         {
             SetMessage(error, isError: true);
@@ -200,12 +204,18 @@ public sealed partial class TagCatalogViewModel : ObservableObject
             Descricao = null;
             Sku = null;
             Observacao = null;
+            Categoria = null;
+            Unidade = null;
+            Localizacao = null;
             SetMessage($"EPC {epc} lido. Preencha a descrição e clique em Cadastrar.", isError: false);
         }
     }
 
     // ───────────────────────── Lista ─────────────────────────
 
+    public string[] StatusFilterOptions { get; } = ["Todos", "DENTRO", "FORA", "NUNCA LIDA"];
+
+    [ObservableProperty] private int _statusFilterIndex;
     [ObservableProperty] private string? _searchText;
     [ObservableProperty] private IReadOnlyList<TagRegistrationItem> _registrations = [];
     [ObservableProperty] private TagRegistrationItem? _selectedRegistration;
@@ -228,19 +238,27 @@ public sealed partial class TagCatalogViewModel : ObservableObject
     {
         var requestId = ++_loadRequestId;
         var term = string.IsNullOrWhiteSpace(SearchText) ? null : SearchText.Trim();
+        var status = StatusFilterIndex switch
+        {
+            1 => RegisteredTagStatusFilter.Dentro,
+            2 => RegisteredTagStatusFilter.Fora,
+            3 => RegisteredTagStatusFilter.NuncaLida,
+            _ => RegisteredTagStatusFilter.Todos,
+        };
         ListMessage = "Carregando...";
         try
         {
-            var rows = await Task.Run(() => _catalog.QueryRegistrationsAsync(term, QueryLimit));
+            var rows = await Task.Run(() => _catalog.QueryRegisteredTagsAsync(term, status, QueryLimit));
             if (requestId != _loadRequestId)
                 return;
 
             var items = rows.Select(r => new TagRegistrationItem(r)).ToArray();
             Registrations = items;
             SelectedRegistration = null;
+            var never = rows.Count(r => r.NeverDetected);
             ListMessage = rows.Count >= QueryLimit
                 ? $"{rows.Count} tags cadastradas (limite atingido — refine a busca)"
-                : $"{rows.Count} tag(s) cadastrada(s)";
+                : never > 0 ? $"{rows.Count} tag(s) · {never} nunca lida(s)" : $"{rows.Count} tag(s)";
         }
         catch (Exception ex)
         {
@@ -256,6 +274,9 @@ public sealed partial class TagCatalogViewModel : ObservableObject
         Descricao = registration.Descricao;
         Sku = registration.Sku;
         Observacao = registration.Observacao;
+        Categoria = registration.Categoria;
+        Unidade = registration.Unidade;
+        Localizacao = registration.Localizacao;
     }
 
     private void ClearForm(bool keepMessage)
@@ -265,6 +286,9 @@ public sealed partial class TagCatalogViewModel : ObservableObject
         Descricao = null;
         Sku = null;
         Observacao = null;
+        Categoria = null;
+        Unidade = null;
+        Localizacao = null;
         CapturedTags = [];
         if (!keepMessage)
             FormMessage = null;
@@ -277,13 +301,21 @@ public sealed partial class TagCatalogViewModel : ObservableObject
     }
 }
 
-public sealed class TagRegistrationItem(TagRegistration registration)
+/// <summary>Linha da lista de tags cadastradas: cadastro + status + última detecção (horário local).</summary>
+public sealed class TagRegistrationItem(RegisteredTag tag)
 {
-    public TagRegistration Registration { get; } = registration;
-    public string Epc { get; } = registration.Epc;
-    public string Descricao { get; } = registration.Descricao;
-    public string Sku { get; } = registration.Sku ?? "—";
-    public string AtualizadoEm { get; } = Display.LocalTime(registration.AtualizadoEmUtc, "dd/MM/yyyy HH:mm");
+    public TagRegistration Registration { get; } = tag.Cadastro;
+    public string Epc { get; } = tag.Epc;
+    public string Descricao { get; } = tag.Cadastro.Descricao;
+    public string Sku { get; } = tag.Cadastro.Sku ?? "—";
+    public string Local { get; } = tag.Cadastro.Localizacao ?? "—";
+    public string Status { get; } = tag.Status is { } s ? Display.Status(s) : "NUNCA LIDA";
+    public bool IsDentro { get; } = tag.Status == TagStatus.Dentro;
+    public bool IsNeverDetected { get; } = tag.NeverDetected;
+    public string UltimaDeteccao { get; } = tag.UltimaDeteccaoUtc is { } t ? Display.LocalTime(t, "dd/MM/yyyy HH:mm:ss") : "—";
+    public string UltimaDeteccaoDetalhe { get; } = tag.UltimaAntenaId is { } a
+        ? $"ANT {a} · {(tag.UltimaRssi is { } r ? Display.Rssi(r) + " dBm" : "—")}"
+        : "";
 }
 
 public sealed class CapturedTagItem(CapturedTag tag)

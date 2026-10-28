@@ -76,4 +76,27 @@ public class TagRegistrationRulesTests
         var ex = Assert.Throws<ArgumentException>(() => TagRegistrationRules.Validate(Input(epc: "XYZ")));
         Assert.Contains("hexadecimais", ex.Message);
     }
+
+    [Fact]
+    public void Campos_opcionais_novos_sao_aparados_e_vazios_viram_null()
+    {
+        var v = TagRegistrationRules.Validate(new TagRegistrationInput("E280", "x", null, null, " Embalagem ", "  ", " Rua A "));
+
+        Assert.Equal("Embalagem", v.Categoria);
+        Assert.Null(v.Unidade);
+        Assert.Equal("Rua A", v.Localizacao);
+    }
+
+    [Theory]
+    [InlineData(65, 1, 1, "Categoria")]
+    [InlineData(1, 17, 1, "Unidade")]
+    [InlineData(1, 1, 101, "Localização")]
+    public void Rejeita_campos_opcionais_acima_do_limite(int categoria, int unidade, int localizacao, string campo)
+    {
+        var input = new TagRegistrationInput("E280", "x", null, null,
+            new string('c', categoria), new string('u', unidade), new string('l', localizacao));
+
+        Assert.False(TagRegistrationRules.TryValidate(input, out _, out var error));
+        Assert.StartsWith(campo, error);
+    }
 }

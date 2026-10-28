@@ -22,4 +22,21 @@ public interface ITagCatalogRepository
 
     /// <summary>Busca parcial case-insensitive em EPC, descrição e SKU; null = todos. Ordem: EPC.</summary>
     Task<IReadOnlyList<TagRegistration>> QueryRegistrationsAsync(string? term, int limit = 500, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Tags cadastradas com status atual e última detecção (view <c>TagsCadastradas</c>).
+    /// Busca parcial em EPC, descrição, SKU, categoria e localização. Ordem: última detecção mais recente;
+    /// nunca lidas no fim, por EPC.
+    /// </summary>
+    Task<IReadOnlyList<RegisteredTag>> QueryRegisteredTagsAsync(
+        string? term, RegisteredTagStatusFilter status = RegisteredTagStatusFilter.Todos, int limit = 500,
+        CancellationToken cancellationToken = default);
+}
+
+public enum RegisteredTagStatusFilter
+{
+    Todos,
+    Dentro,
+    Fora,
+    NuncaLida,
 }

@@ -167,7 +167,7 @@
     </Style>
 
     <!-- ── Campos: cantos retos, fundo de tela rebaixada ── -->
-    <Style Selector="TextBox, ComboBox, NumericUpDown">
+    <Style Selector="TextBox, ComboBox, NumericUpDown, CalendarDatePicker">
       <Setter Property="CornerRadius" Value="0" />
     </Style>
     <Style Selector="TextBox">
@@ -177,7 +177,7 @@
     <Style Selector="TextBox.mono">
       <Setter Property="FontFamily" Value="{StaticResource MonoFont}" />
     </Style>
-    <Style Selector="ComboBox">
+    <Style Selector="ComboBox, CalendarDatePicker">
       <Setter Property="Background" Value="{StaticResource ScreenBrush}" />
       <Setter Property="BorderBrush" Value="{StaticResource HairlineBrush}" />
     </Style>

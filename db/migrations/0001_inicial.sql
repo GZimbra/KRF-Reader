@@ -1,10 +1,9 @@
 -- =====================================================================================
--- KRF Reader - schema do banco (SQLite)
+-- KRF Reader - migração 0001: schema inicial (v0.1–v0.4)
 --
--- Idempotente: pode ser executado a cada inicialização (CREATE ... IF NOT EXISTS).
--- Este arquivo é a fonte única do schema: é embutido no assembly KrfReader.Infrastructure
--- (recurso "KrfReader.Infrastructure.schema.sql") e executado por
--- SqliteInventoryRepository.InitializeAsync.
+-- Usa CREATE ... IF NOT EXISTS porque bancos anteriores ao versionamento (user_version = 0)
+-- já têm estas tabelas: rodar de novo sobre eles é no-op. As alterações seguintes estão nas
+-- migrações 0002+ (ver SchemaMigrator). Não edite migração já publicada: crie a próxima.
 --
 -- Modelo:
 --   * Tags    = estado atual de cada tag (uma linha por EPC).

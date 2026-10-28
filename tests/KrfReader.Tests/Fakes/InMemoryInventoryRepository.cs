@@ -1,4 +1,5 @@
 using KrfReader.Application.Persistence;
+using KrfReader.Application.Pipeline;
 using KrfReader.Domain;
 
 namespace KrfReader.Tests.Fakes;
@@ -16,6 +17,7 @@ public sealed class InMemoryInventoryRepository : IInventoryRepository
     private readonly Dictionary<string, TagState> _tags = new(StringComparer.Ordinal);
     private readonly List<InventoryEvent> _events = [];
     private readonly List<BatchCall> _calls = [];
+    private readonly List<PassageSnapshot> _passages = [];
     private TaskCompletionSource? _gate;
     private TaskCompletionSource _batchEntered = NewTcs();
     private long _nextEventId;
@@ -41,6 +43,11 @@ public sealed class InMemoryInventoryRepository : IInventoryRepository
     public IReadOnlyList<InventoryEvent> Events
     {
         get { lock (_sync) return _events.ToArray(); }
+    }
+
+    public IReadOnlyList<PassageSnapshot> Passages
+    {
+        get { lock (_sync) return _passages.ToArray(); }
     }
 
     public void Block()
@@ -105,7 +112,7 @@ public sealed class InMemoryInventoryRepository : IInventoryRepository
                 TagStatus? previous = _tags.TryGetValue(r.Epc, out var cur) ? cur.Status : null;
                 var d = InventoryRules.Decide(previous, mode);
                 var statusAt = d.ChangesState || cur is null ? r.TimestampUtc : cur.UltimaAtualizacaoStatusUtc;
-                _tags[r.Epc] = new TagState(r.Epc, d.NewStatus, r.TimestampUtc, statusAt);
+                _tags[r.Epc] = new TagState(r.Epc, d.NewStatus, r.TimestampUtc, statusAt, UltimaAntenaId: r.AntennaId, UltimaRssi: r.Rssi);
                 if (d.Event is { } ev)
                     _events.Add(new InventoryEvent(++_nextEventId, r.Epc, mode, ev, r.TimestampUtc, r.AntennaId, r.Rssi));
                 applied.Add(new AppliedRead(r, mode, previous, d.NewStatus, d.Event));
@@ -151,6 +158,35 @@ public sealed class InMemoryInventoryRepository : IInventoryRepository
                 .Take(limit)
                 .ToArray();
             return Task.FromResult(list);
+        }
+    }
+
+    public Task<IReadOnlyList<StockMovement>> QueryMovementsAsync(MovementFilter filter, CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            IReadOnlyList<StockMovement> list = _events
+                .Where(e => filter.FromUtc is null || e.TimestampUtc >= filter.FromUtc)
+                .Where(e => filter.ToUtc is null || e.TimestampUtc < filter.ToUtc)
+                .Where(e => filter.Tipo is null || e.Mode == filter.Tipo)
+                .Where(e => !filter.OnlyAnomalies || e.IsAnomaly)
+                .Where(e => filter.Search is null || e.Epc.Contains(filter.Search, StringComparison.OrdinalIgnoreCase))
+                .OrderByDescending(e => e.TimestampUtc).ThenByDescending(e => e.Id)
+                .Take(filter.Limit)
+                .Select(e => new StockMovement(e.Id, e.Epc, null, null, e.Mode, e.Type, e.TimestampUtc, e.AntennaId, e.Rssi, null))
+                .ToArray();
+            return Task.FromResult(list);
+        }
+    }
+
+    public Task<long?> SavePassageAsync(PassageSnapshot passage, CancellationToken cancellationToken = default)
+    {
+        lock (_sync)
+        {
+            if (passage.Mode is null)
+                return Task.FromResult<long?>(null);
+            _passages.Add(passage);
+            return Task.FromResult<long?>(_passages.Count);
         }
     }
 

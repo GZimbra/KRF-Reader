@@ -1,3 +1,4 @@
+using KrfReader.Application.Pipeline;
 using KrfReader.Domain;
 
 namespace KrfReader.Application.Persistence;
@@ -8,14 +9,15 @@ namespace KrfReader.Application.Persistence;
 /// </summary>
 public interface IInventoryRepository
 {
-    /// <summary>Cria schema/índices se não existirem. Idempotente.</summary>
+    /// <summary>Aplica as migrações de schema pendentes. Idempotente; preserva os dados existentes.</summary>
     Task InitializeAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Aplica um lote de leituras (todas do mesmo <paramref name="mode"/>) em UMA transação:
     /// carrega estado atual dos EPCs, decide via <see cref="InventoryRules.Decide"/> processando as leituras
     /// em ordem (o mesmo EPC pode aparecer mais de uma vez; o estado em memória é atualizado a cada uma),
-    /// faz upsert em Tags (UltimaLeitura sempre; Status/UltimaAtualizacaoStatus só se mudou) e insere em
+    /// faz upsert em Tags (UltimaLeitura + antena/RSSI da leitura mais recente sempre; Status/UltimaAtualizacaoStatus
+    /// só se mudou) e insere em
     /// Eventos apenas as leituras que geraram evento (Criacao, MudancaStatus, SaidaSemEntrada).
     /// Lote vazio = no-op.
     /// </summary>
@@ -31,6 +33,46 @@ public interface IInventoryRepository
 
     /// <summary>Histórico de uma tag, mais recente primeiro.</summary>
     Task<IReadOnlyList<InventoryEvent>> GetEventsAsync(string epc, int limit = 200, CancellationToken cancellationToken = default);
+
+    /// <summary>Movimentações de estoque filtradas, mais recente primeiro.</summary>
+    Task<IReadOnlyList<StockMovement>> QueryMovementsAsync(MovementFilter filter, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Grava uma passagem fechada (veredito de alta densidade). Retorna o Id no banco, que difere do número
+    /// em memória do <see cref="PassageTracker"/> (reinicia a cada execução). Passagem sem modo é ignorada (retorna null).
+    /// </summary>
+    Task<long?> SavePassageAsync(PassageSnapshot passage, CancellationToken cancellationToken = default);
+}
+
+/// <summary>Filtro da consulta de movimentações. Datas em UTC; intervalo [FromUtc, ToUtc).</summary>
+/// <param name="Search">Busca parcial em EPC, descrição e SKU; null = sem filtro.</param>
+/// <param name="OnlyAnomalies">Só SAÍDA SEM ENTRADA.</param>
+public sealed record MovementFilter(
+    DateTime? FromUtc = null,
+    DateTime? ToUtc = null,
+    OperationMode? Tipo = null,
+    string? Search = null,
+    bool OnlyAnomalies = false,
+    int Limit = 1000)
+{
+    /// <summary>
+    /// Converte um período em dias do calendário local (inclusivo nas duas pontas) para o intervalo UTC
+    /// [from 00:00, to+1 00:00). Meia-noite inexistente (início de horário de verão) vira a primeira hora válida.
+    /// </summary>
+    public static (DateTime? FromUtc, DateTime? ToUtc) LocalDaysToUtc(DateOnly? from, DateOnly? to, TimeZoneInfo zone)
+    {
+        ArgumentNullException.ThrowIfNull(zone);
+        return (from is { } f ? StartOfDayUtc(f, zone) : null,
+                to is { } t ? StartOfDayUtc(t.AddDays(1), zone) : null);
+    }
+
+    private static DateTime StartOfDayUtc(DateOnly day, TimeZoneInfo zone)
+    {
+        var local = day.ToDateTime(TimeOnly.MinValue, DateTimeKind.Unspecified);
+        while (zone.IsInvalidTime(local))
+            local = local.AddMinutes(30);
+        return TimeZoneInfo.ConvertTimeToUtc(local, zone);
+    }
 }
 
 /// <summary>Resultado de uma leitura aplicada.</summary>

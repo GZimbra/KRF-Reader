@@ -39,6 +39,23 @@ public static class ReaderSettingsStore
             },
             [nameof(ReaderOptions.PowerDbm)] = options.PowerDbm,
             [nameof(ReaderOptions.Antennas)] = new JsonArray(options.Antennas.Select(a => (JsonNode)a).ToArray()),
+            [nameof(ReaderOptions.AntennaPowerDbm)] = new JsonObject((options.AntennaPowerDbm ?? []).OrderBy(p => p.Key)
+                .Select(p => KeyValuePair.Create(p.Key.ToString(System.Globalization.CultureInfo.InvariantCulture), (JsonNode?)p.Value))),
+            [nameof(ReaderOptions.EnforceAnatelBand)] = options.EnforceAnatelBand,
+            [nameof(ReaderOptions.Llrp)] = new JsonObject
+            {
+                [nameof(LlrpReaderOptions.KeepaliveMs)] = options.Llrp.KeepaliveMs,
+                [nameof(LlrpReaderOptions.ResponseTimeoutMs)] = options.Llrp.ResponseTimeoutMs,
+                [nameof(LlrpReaderOptions.ResetToFactoryDefault)] = options.Llrp.ResetToFactoryDefault,
+            },
+            [nameof(ReaderOptions.ImpinjIot)] = new JsonObject
+            {
+                [nameof(ImpinjIotReaderOptions.UseHttps)] = options.ImpinjIot.UseHttps,
+                [nameof(ImpinjIotReaderOptions.Username)] = options.ImpinjIot.Username,
+                [nameof(ImpinjIotReaderOptions.Password)] = options.ImpinjIot.Password,
+                [nameof(ImpinjIotReaderOptions.AllowSelfSignedCertificate)] = options.ImpinjIot.AllowSelfSignedCertificate,
+                [nameof(ImpinjIotReaderOptions.PresetId)] = options.ImpinjIot.PresetId,
+            },
             [nameof(ReaderOptions.ReconnectDelayMs)] = options.ReconnectDelayMs,
             [nameof(ReaderOptions.Inventory)] = new JsonObject
             {

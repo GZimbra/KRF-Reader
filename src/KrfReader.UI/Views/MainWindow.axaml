@@ -774,7 +774,7 @@
                               ItemsSource="{Binding ReaderTypes}" SelectedIndex="{Binding ReaderTypeIndex}" />
                   </Grid>
 
-                  <Grid ColumnDefinitions="150,*">
+                  <Grid ColumnDefinitions="150,*" IsVisible="{Binding IsProtocolSelectable}">
                     <TextBlock Classes="field" Text="PROTOCOLO" />
                     <ComboBox Grid.Column="1" Width="260"
                               ItemsSource="{Binding Protocols}" SelectedItem="{Binding SelectedProtocol}" />
@@ -799,12 +799,21 @@
                     </StackPanel>
                   </Grid>
 
-                  <Grid ColumnDefinitions="150,*" IsVisible="{Binding IsTcpSelected}">
-                    <TextBlock Classes="field" Text="HOST · PORTA" />
+                  <Grid ColumnDefinitions="150,*" IsVisible="{Binding IsNetworkSelected}">
+                    <TextBlock Classes="field" Text="IP · PORTA" />
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
                       <TextBox Width="200" Classes="mono" Text="{Binding TcpHost}" Watermark="192.168.1.100" />
                       <NumericUpDown Width="170" Minimum="1" Maximum="65535" Increment="1"
                                      FormatString="0" Value="{Binding TcpPort}" />
+                    </StackPanel>
+                  </Grid>
+
+                  <Grid ColumnDefinitions="150,*" IsVisible="{Binding IsImpinjIotSelected}">
+                    <TextBlock Classes="field" Text="API · USUÁRIO" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+                      <TextBox Width="140" Classes="mono" Text="{Binding IotUsername}" Watermark="root" />
+                      <TextBox Width="160" Classes="mono" PasswordChar="•" Text="{Binding IotPassword}" Watermark="senha" />
+                      <CheckBox Content="HTTPS" IsChecked="{Binding IotUseHttps}" />
                     </StackPanel>
                   </Grid>
 
@@ -823,6 +832,20 @@
                       <TextBox Width="160" Classes="mono" Text="{Binding ReaderAntennasText}" Watermark="1,2" />
                       <TextBlock Classes="hint" Text="portas físicas ligadas" />
                     </StackPanel>
+                  </Grid>
+
+                  <Grid ColumnDefinitions="150,*">
+                    <TextBlock Classes="field" Text="POTÊNCIA / PORTA" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                      <TextBox Width="160" Classes="mono" Text="{Binding AntennaPowerText}" Watermark="1:30; 2:27" />
+                      <TextBlock Classes="hint" Text="porta:dBm · vazio = mesma potência em todas" />
+                    </StackPanel>
+                  </Grid>
+
+                  <Grid ColumnDefinitions="150,*">
+                    <TextBlock Classes="field" Text="FAIXA" />
+                    <CheckBox Grid.Column="1" IsChecked="{Binding EnforceAnatelBand}"
+                              Content="Exigir 915–928 MHz (Anatel) · recusa leitor que não garanta a faixa" />
                   </Grid>
 
                   <Border Height="1" Background="{StaticResource HairlineBrush}" Margin="0,6" />
@@ -886,7 +909,7 @@
                     <TextBlock Classes="sectionTitle" Text="ANTICOLISÃO · MUITAS TAGS" />
                   </DockPanel>
                   <TextBlock Classes="hint"
-                             Text="Parâmetros Gen2 do inventário (R200/M100). Padrão para carga de dezenas de tags: S2, alternância A↔B, Q dinâmico. Q fixo só se souber o tamanho da população." />
+                             Text="Parâmetros Gen2 do inventário. R200/M100: Q dinâmico e troca A↔B pelo app. LLRP/Impinj IoT/R2000: Session, target e Q inicial (população estimada) vão ao leitor ao conectar; o leitor ajusta o Q." />
 
                   <Grid ColumnDefinitions="150,*" Margin="0,4,0,0">
                     <TextBlock Classes="field" Text="SESSION" />

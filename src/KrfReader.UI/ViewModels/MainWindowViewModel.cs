@@ -84,6 +84,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _tcpPort = readerOptions.Tcp.Port;
         _powerDbm = (decimal)Math.Clamp(readerOptions.PowerDbm, 0, 33);
         _readerAntennasText = string.Join(",", readerOptions.Antennas);
+        _antennaPowerText = FormatAntennaPower(readerOptions.AntennaPowerDbm);
+        _enforceAnatelBand = readerOptions.EnforceAnatelBand;
+        _iotUseHttps = readerOptions.ImpinjIot.UseHttps;
+        _iotUsername = readerOptions.ImpinjIot.Username;
+        _iotPassword = readerOptions.ImpinjIot.Password;
 
         _minRssi = Math.Clamp(pipelineOptions.MinRssi, -100, -20);
         _filterAntennasText = string.Join(",", pipelineOptions.AllowedAntennas);
@@ -331,15 +336,27 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     // ───────────────────────── Configuração ─────────────────────────
 
-    public string[] ReaderTypes { get; } = ["Serial", "TCP/IP"];
+    /// <summary>Na ordem de <see cref="ReaderType"/>.</summary>
+    public string[] ReaderTypes { get; } = ["Serial", "TCP/IP", "LLRP · rede", "Impinj IoT · REST"];
     public IReadOnlyList<string> Protocols { get; }
 
     [ObservableProperty]
-    [NotifyPropertyChangedFor(nameof(IsSerialSelected), nameof(IsTcpSelected))]
+    [NotifyPropertyChangedFor(nameof(IsSerialSelected), nameof(IsTcpSelected), nameof(IsNetworkSelected),
+        nameof(IsProtocolSelectable), nameof(IsImpinjIotSelected))]
     private int _readerTypeIndex;
 
-    public bool IsSerialSelected => ReaderTypeIndex == (int)ReaderType.Serial;
-    public bool IsTcpSelected => ReaderTypeIndex == (int)ReaderType.Tcp;
+    private ReaderType SelectedReaderType => (ReaderType)Math.Clamp(ReaderTypeIndex, 0, ReaderTypes.Length - 1);
+
+    public bool IsSerialSelected => SelectedReaderType == ReaderType.Serial;
+    public bool IsTcpSelected => SelectedReaderType == ReaderType.Tcp;
+
+    /// <summary>Host/porta valem para TCP, LLRP e Impinj IoT.</summary>
+    public bool IsNetworkSelected => SelectedReaderType != ReaderType.Serial;
+
+    /// <summary>Protocolo plugável só existe nos transportes genéricos (Serial/TCP).</summary>
+    public bool IsProtocolSelectable => SelectedReaderType is ReaderType.Serial or ReaderType.Tcp;
+
+    public bool IsImpinjIotSelected => SelectedReaderType == ReaderType.ImpinjIot;
 
     [ObservableProperty] private string? _selectedProtocol;
     [ObservableProperty] private string? _serialPortName;
@@ -348,6 +365,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private decimal? _tcpPort;
     [ObservableProperty] private decimal? _powerDbm;
     [ObservableProperty] private string? _readerAntennasText;
+    [ObservableProperty] private string? _antennaPowerText;
+    [ObservableProperty] private bool _enforceAnatelBand;
+    [ObservableProperty] private bool _iotUseHttps;
+    [ObservableProperty] private string? _iotUsername;
+    [ObservableProperty] private string? _iotPassword;
     [ObservableProperty] private string? _configMessage;
 
     // ── Modelo do leitor (catálogo) ──
@@ -377,6 +399,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
             var connection = m.Type switch
             {
                 ReaderType.Tcp => $"TCP/IP · porta {m.DefaultTcpPort}",
+                ReaderType.Llrp => $"LLRP · TCP {m.DefaultTcpPort}",
+                ReaderType.ImpinjIot => $"HTTPS REST · porta {m.DefaultTcpPort}",
                 _ => $"Serial · {m.DefaultBaudRate} baud 8N1",
             };
             SpecItem[] items =
@@ -407,8 +431,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
             SelectedProtocol = Protocols.First(p => string.Equals(p, value.Protocol, StringComparison.OrdinalIgnoreCase));
         if (value.Type == ReaderType.Serial)
             BaudRate = value.DefaultBaudRate;
-        if (value.Type == ReaderType.Tcp)
+        if (value.Type != ReaderType.Serial)
             TcpPort = value.DefaultTcpPort;
+        if (value.Type == ReaderType.ImpinjIot)
+            IotUseHttps = value.DefaultTcpPort != 80;
         PowerDbm = (decimal)value.DefaultPowerDbm;
         ReaderAntennasText = "1";
         ConfigMessage = $"Padrões de \"{value.DisplayName}\" carregados. Clique em \"Aplicar leitor\" para conectar.";
@@ -548,7 +574,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private bool TryBuildReaderOptions(out ReaderOptions options, out string error)
     {
         options = null!;
-        var type = (ReaderType)Math.Clamp(ReaderTypeIndex, 0, 1);
+        var type = SelectedReaderType;
 
         if (PowerDbm is not { } power || power < 0 || power > 33)
         {
@@ -559,6 +585,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
         if (!TryParseAntennas(ReaderAntennasText, allowEmpty: false, out var antennas))
         {
             error = "Antenas ativas inválidas: informe ao menos uma, separadas por vírgula (ex.: 1,2).";
+            return false;
+        }
+
+        if (!TryParseAntennaPower(AntennaPowerText, out var antennaPower, out error))
+            return false;
+        if (antennaPower.Keys.FirstOrDefault(port => !antennas.Contains(port)) is > 0 and var inactive)
+        {
+            error = $"Potência definida para a porta {inactive}, que não está nas antenas ativas.";
             return false;
         }
 
@@ -592,7 +626,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 return false;
             }
         }
-        else if (type == ReaderType.Tcp)
+        else
         {
             if (tcp.Host.Length == 0)
             {
@@ -606,9 +640,24 @@ public sealed partial class MainWindowViewModel : ObservableObject
             }
         }
 
-        if (string.IsNullOrWhiteSpace(SelectedProtocol))
+        if (IsProtocolSelectable && string.IsNullOrWhiteSpace(SelectedProtocol))
         {
             error = "Selecione um protocolo.";
+            return false;
+        }
+
+        var baseIot = _baseReaderOptions.ImpinjIot;
+        var iot = new ImpinjIotReaderOptions
+        {
+            UseHttps = IotUseHttps,
+            Username = IotUsername?.Trim() ?? "",
+            Password = IotPassword ?? "",
+            AllowSelfSignedCertificate = baseIot.AllowSelfSignedCertificate,
+            PresetId = baseIot.PresetId,
+        };
+        if (type == ReaderType.ImpinjIot && iot.Username.Length == 0)
+        {
+            error = "Informe o usuário da API REST do leitor.";
             return false;
         }
 
@@ -619,17 +668,62 @@ public sealed partial class MainWindowViewModel : ObservableObject
         {
             Model = SelectedReaderModel.Id,
             Type = type,
-            Protocol = SelectedProtocol ?? _baseReaderOptions.Protocol,
+            Protocol = type switch
+            {
+                ReaderType.Llrp => "LLRP",
+                ReaderType.ImpinjIot => "ImpinjIoT",
+                _ => SelectedProtocol ?? _baseReaderOptions.Protocol,
+            },
             Serial = serial,
             Tcp = tcp,
             PowerDbm = (double)power,
             Antennas = antennas,
+            AntennaPowerDbm = antennaPower,
+            EnforceAnatelBand = EnforceAnatelBand,
+            Llrp = _baseReaderOptions.Llrp,
+            ImpinjIot = iot,
             ReconnectDelayMs = _baseReaderOptions.ReconnectDelayMs,
             Inventory = inventory,
         };
         error = "";
         return true;
     }
+
+    /// <summary>Formato "porta:dBm" separado por vírgula/ponto e vírgula (ex.: "1:30; 2:27,5"). Vazio = mesma potência em todas.</summary>
+    internal static bool TryParseAntennaPower(string? text, out Dictionary<int, double> power, out string error)
+    {
+        power = [];
+        error = "";
+        // Vírgula antes de "porta:" separa pares ("1:30,2:27"); as demais são decimais ("2:27,5").
+        var normalized = PowerPairSeparator().Replace(text ?? "", ";");
+        foreach (var item in normalized.Split(PowerSeparators, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var parts = item.Split(PowerKeySeparators, 2, StringSplitOptions.TrimEntries);
+            if (parts.Length != 2
+                || !int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var port) || port is < 1 or > 64
+                || !double.TryParse(parts[1].Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out var dbm)
+                || dbm is < 0 or > 33)
+            {
+                error = $"Potência por porta inválida em \"{item}\": use porta:dBm (0–33), ex.: 1:30; 2:27.";
+                return false;
+            }
+
+            power[port] = dbm;
+        }
+
+        return true;
+    }
+
+    private static readonly char[] PowerSeparators = [';'];
+    private static readonly char[] PowerKeySeparators = [':', '='];
+
+    [System.Text.RegularExpressions.GeneratedRegex(@",(?=\s*\d+\s*[:=])")]
+    private static partial System.Text.RegularExpressions.Regex PowerPairSeparator();
+
+    internal static string FormatAntennaPower(IReadOnlyDictionary<int, double>? power) =>
+        power is null || power.Count == 0
+            ? ""
+            : string.Join("; ", power.OrderBy(p => p.Key).Select(p => string.Create(CultureInfo.InvariantCulture, $"{p.Key}:{p.Value:0.##}")));
 
     private static bool TryParseAntennas(string? text, bool allowEmpty, out int[] antennas)
     {
@@ -734,6 +828,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
             IsPipelineRunning = true;
             ActiveMode = handle.Pipeline.CurrentMode;
             StatusMessage = "Leitor pronto. Selecione ENTRADA ou SAÍDA.";
+            if (handle.Reader is IReaderInfoSource { Info: { } info })
+                ConfigMessage = $"Leitor identificado: {info.Description}";
         }
         catch (Exception ex)
         {

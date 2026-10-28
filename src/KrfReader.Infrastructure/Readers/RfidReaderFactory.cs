@@ -16,10 +16,11 @@ namespace KrfReader.Infrastructure.Readers;
 /// <c>Reader:Protocol = &lt;nome&gt;</c>. Transporte, reconexão e threading já vêm prontos; nada muda aqui.
 /// </description></item>
 /// <item><description>
-/// <b>SDK do fabricante (DLL própria) ou LLRP</b>: o SDK/LLRP já cuida do transporte, então implemente
+/// <b>SDK do fabricante (DLL própria) ou API própria</b> (como <see cref="Llrp.LlrpReader"/> e
+/// <see cref="ImpinjIot.ImpinjIotReader"/>): o driver cuida do transporte, então implemente
 /// <see cref="IRfidReader"/> diretamente numa nova classe em <c>Infrastructure/Readers</c> (respeitando o contrato
 /// de threading e "nenhum TagRead após StopInventoryAsync"), acrescente um valor em <see cref="ReaderType"/>
-/// (ex.: <c>Llrp</c>) com suas opções em <see cref="ReaderOptions"/> e adicione o caso no <c>switch</c> abaixo.
+/// (ex.: <c>Llrp</c>, <c>ImpinjIot</c>) com suas opções em <see cref="ReaderOptions"/> e adicione o caso no <c>switch</c> abaixo.
 /// </description></item>
 /// </list>
 /// </summary>
@@ -37,7 +38,9 @@ public sealed class RfidReaderFactory(IReaderProtocolFactory protocols, ILoggerF
                 options, _protocols.Create(options.Protocol), loggerFactory?.CreateLogger<GenericSerialReader>()),
             ReaderType.Tcp => new GenericTcpReader(
                 options, _protocols.Create(options.Protocol), loggerFactory?.CreateLogger<GenericTcpReader>()),
-            // Novo driver (SDK/LLRP): novo ReaderType + novo case aqui.
+            ReaderType.Llrp => new Llrp.LlrpReader(options, loggerFactory?.CreateLogger<Llrp.LlrpReader>()),
+            ReaderType.ImpinjIot => new ImpinjIot.ImpinjIotReader(options, loggerFactory?.CreateLogger<ImpinjIot.ImpinjIotReader>()),
+            // Novo driver (SDK do fabricante): novo ReaderType + novo case aqui.
             _ => throw new ArgumentOutOfRangeException(nameof(options), options.Type, "Tipo de leitor não suportado."),
         };
     }

@@ -2,8 +2,17 @@
 
 public enum ReaderType
 {
+    /// <summary>Porta serial/USB com protocolo plugável (<see cref="ReaderOptions.Protocol"/>).</summary>
     Serial,
+
+    /// <summary>Socket TCP com protocolo plugável (<see cref="ReaderOptions.Protocol"/>).</summary>
     Tcp,
+
+    /// <summary>LLRP 1.0.1 (EPCglobal) sobre TCP: Impinj Speedway/R700, Zebra FX7500/FX9600 e similares.</summary>
+    Llrp,
+
+    /// <summary>Impinj IoT Device Interface (REST/HTTP) do Impinj R700.</summary>
+    ImpinjIot,
 }
 
 /// <summary>Seção <c>Reader</c> do appsettings.json.</summary>
@@ -29,11 +38,36 @@ public sealed class ReaderOptions
     /// <summary>Antenas ativas no leitor (portas físicas).</summary>
     public int[] Antennas { get; set; } = [1];
 
+    /// <summary>
+    /// Potência por porta (dBm), sobrepondo <see cref="PowerDbm"/> nas portas listadas. Chave = número da porta.
+    /// Só vale em leitores multiporta que aceitam potência individual (LLRP, Impinj IoT, R2000 com firmware ≥ 1.x).
+    /// </summary>
+    public Dictionary<int, double> AntennaPowerDbm { get; set; } = [];
+
+    /// <summary>
+    /// true = só opera em 915–928 MHz (Anatel, Res. 680/2017). Leitores que o app consegue configurar (R200/M100,
+    /// R2000, Impinj IoT) recebem a faixa; nos LLRP o app só confere a tabela anunciada e recusa conectar se
+    /// houver canal fora dela.
+    /// </summary>
+    public bool EnforceAnatelBand { get; set; } = true;
+
+    public LlrpReaderOptions Llrp { get; set; } = new();
+
+    public ImpinjIotReaderOptions ImpinjIot { get; set; } = new();
+
     /// <summary>Espera entre tentativas de reconexão automática.</summary>
     public int ReconnectDelayMs { get; set; } = 2000;
 
     /// <summary>Anticolisão Gen2 para leitura de muitas tags simultâneas.</summary>
     public InventoryOptions Inventory { get; set; } = new();
+
+    /// <summary>Potência efetiva de uma porta: a individual, se houver, senão <see cref="PowerDbm"/>.</summary>
+    public double PowerFor(int antenna) =>
+        AntennaPowerDbm is not null && AntennaPowerDbm.TryGetValue(antenna, out var dbm) ? dbm : PowerDbm;
+
+    /// <summary>Portas ativas (sem repetição, em ordem) com a potência efetiva de cada uma.</summary>
+    public IReadOnlyList<Readers.AntennaPort> ActivePorts() =>
+        (Antennas ?? []).Where(a => a >= 1).Distinct().Order().Select(a => new Readers.AntennaPort(a, PowerFor(a))).ToArray();
 }
 
 /// <summary>Alternância de target entre rodadas.</summary>
@@ -55,7 +89,9 @@ public enum TargetStrategy
 /// <summary>
 /// Seção <c>Reader:Inventory</c>. Padrões pensados para passagem de dezenas de tags por uma antena:
 /// Session S2 (tag lida fica quieta ≥ 2 s), alternância A/B por rodada e Q ajustado à população vista.
-/// Só tem efeito em protocolos que implementam <see cref="Readers.IInventoryParameterProtocol"/> (R200/M100).
+/// Q dinâmico e troca A/B em tempo real só em protocolos <see cref="Readers.IInventoryParameterProtocol"/> (R200/M100).
+/// LLRP e Impinj IoT usam Session, população estimada (2^<see cref="InitialQ"/>) e o modo de busca (single/dual target)
+/// fixos ao conectar; o próprio leitor ajusta o Q.
 /// </summary>
 public sealed class InventoryOptions
 {
@@ -97,9 +133,46 @@ public sealed class SerialReaderOptions
     public string StopBits { get; set; } = "One";
 }
 
+/// <summary>Endereço de rede. Vale para <see cref="ReaderType.Tcp"/>, <see cref="ReaderType.Llrp"/> e <see cref="ReaderType.ImpinjIot"/>.</summary>
 public sealed class TcpReaderOptions
 {
     public string Host { get; set; } = "192.168.1.100";
     public int Port { get; set; } = 4001;
     public int ConnectTimeoutMs { get; set; } = 5000;
+}
+
+/// <summary>Seção <c>Reader:Llrp</c>.</summary>
+public sealed class LlrpReaderOptions
+{
+    /// <summary>Porta padrão IANA do LLRP sem TLS.</summary>
+    public const int DefaultPort = 5084;
+
+    /// <summary>Intervalo de KEEPALIVE pedido ao leitor. Sem nenhuma mensagem por 3× este tempo = link caído. 0 = sem watchdog.</summary>
+    public int KeepaliveMs { get; set; } = 5000;
+
+    /// <summary>Espera máxima por resposta a cada comando LLRP.</summary>
+    public int ResponseTimeoutMs { get; set; } = 5000;
+
+    /// <summary>true = SET_READER_CONFIG com ResetToFactoryDefault ao conectar (apaga ROSpecs/config LLRP de outros clientes; não mexe em rede nem região).</summary>
+    public bool ResetToFactoryDefault { get; set; } = true;
+}
+
+/// <summary>Seção <c>Reader:ImpinjIot</c> (Impinj IoT Device Interface, R700).</summary>
+public sealed class ImpinjIotReaderOptions
+{
+    public bool UseHttps { get; set; } = true;
+
+    public string Username { get; set; } = "root";
+
+    /// <summary>Senha da API REST. Fica em texto puro no appsettings: troque a senha padrão do leitor.</summary>
+    public string Password { get; set; } = "impinj";
+
+    /// <summary>
+    /// true = aceita o certificado autoassinado de fábrica do R700. Expõe a credencial a man-in-the-middle na rede;
+    /// em produção, instale um certificado confiável no leitor e desligue.
+    /// </summary>
+    public bool AllowSelfSignedCertificate { get; set; } = true;
+
+    /// <summary>Nome do preset de inventário gravado no leitor.</summary>
+    public string PresetId { get; set; } = "krf-reader";
 }

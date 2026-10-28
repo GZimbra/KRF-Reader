@@ -318,7 +318,9 @@ public abstract class StreamRfidReaderBase : IRfidReader, IInventoryTuning, IRea
 
     private async Task ConfigureAsync(Stream stream, CancellationToken cancellationToken)
     {
-        var commands = _protocol.BuildConfigureCommands(Options.PowerDbm, Options.Antennas ?? []);
+        var commands = _protocol is IMultiAntennaProtocol multi
+            ? multi.BuildRadioCommands(new RadioSetup(Options.ActivePorts(), Options.EnforceAnatelBand))
+            : _protocol.BuildConfigureCommands(Options.PowerDbm, Options.Antennas ?? []);
         foreach (var command in commands)
             await WriteCommandAsync(stream, command, cancellationToken).ConfigureAwait(false);
 

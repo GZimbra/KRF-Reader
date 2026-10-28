@@ -9,17 +9,20 @@
     <img src="https://img.shields.io/badge/.NET-8.0-512BD4?style=flat-square&amp;logo=dotnet&amp;logoColor=white" alt=".NET 8" />
     <img src="https://img.shields.io/badge/UI-Avalonia%2011.3-FFA600?style=flat-square" alt="Avalonia 11.3" />
     <img src="https://img.shields.io/badge/Banco-SQLite%20%7C%20SQL%20Server%20%2B%20Dapper-003B57?style=flat-square&amp;logo=sqlite&amp;logoColor=white" alt="SQLite ou SQL Server com Dapper" />
-    <img src="https://img.shields.io/badge/Leitor-R200%20%7C%20Serial%20%7C%20TCP-191919?style=flat-square" alt="Leitor R200, Serial ou TCP" />
+    <img src="https://img.shields.io/badge/Leitor-R200%20%7C%20R2000%20%7C%20LLRP%20%7C%20Impinj%20IoT-191919?style=flat-square" alt="Leitor R200, R2000, LLRP ou Impinj IoT" />
     <img src="https://img.shields.io/badge/Plataformas-Windows%20%7C%20Linux%20%7C%20macOS-555555?style=flat-square" alt="Windows, Linux e macOS" />
-    <img src="https://img.shields.io/badge/Testes-310%20casos%20xUnit-2E7D32?style=flat-square" alt="310 casos de teste xUnit" />
+    <img src="https://img.shields.io/badge/Testes-359%20casos%20xUnit-2E7D32?style=flat-square" alt="359 casos de teste xUnit" />
   </p>
 </div>
 
 > [!WARNING]
 > O app não tem modo simulado: ele sobe conectando no leitor **R200** (COM3, 115200, 915–928 MHz). Com o R200 real
 > foram validados identificação, potência, região/canais, início e parada do inventário. **A leitura de tags com
-> hardware real nunca foi validada**: o leitor foi testado sem antena. O pipeline foi coberto por 310 testes
+> hardware real nunca foi validada**: o leitor foi testado sem antena. O pipeline foi coberto por 359 testes
 > automatizados, que usam um simulador que só existe no projeto de testes.
+> Os drivers de leitores industriais (**LLRP** para Impinj R700/Speedway e Zebra FX9600/FX7500, **Impinj IoT REST**
+> para o R700, **R2000 multiporta** para Chafon CF-RU5106 e similares) seguem as especificações publicadas e foram
+> testados só contra leitores falsos no projeto de testes. **Nenhum deles foi validado em hardware.**
 > UHF lê fora da zona de interesse; o software mitiga leituras fantasma, mas não resolve. Leia
 > [Limitações físicas do UHF](#limitações-físicas-do-uhf) antes de instalar.
 
@@ -87,10 +90,11 @@ KRF-Reader/
 │   │   ├── Configuration/             # ReaderOptions (+ Inventory), PipelineOptions, PassageOptions, DatabaseOptions
 │   │   ├── Persistence/               # IInventoryRepository, ITagCatalogRepository
 │   │   ├── Pipeline/                  # InventoryPipeline, Deduplicator, ReadFilter, ModeState, PassageTracker, PassageMonitor
-│   │   └── Readers/                   # IRfidReader, IReaderProtocol, IRfidReaderFactory, InventoryTuning (Gen2)
+│   │   └── Readers/                   # IRfidReader, IReaderProtocol, IRfidReaderFactory, InventoryTuning (Gen2), RadioSetup (portas, Anatel)
 │   ├── KrfReader.Infrastructure/
 │   │   ├── Persistence/               # Sqlite/SqlServerInventoryRepository, BatchPlanner, migradores
-│   │   └── Readers/                   # GenericSerialReader, GenericTcpReader, Protocols/ (R200/M100, R2000, AsciiLine)
+│   │   └── Readers/                   # GenericSerialReader, GenericTcpReader, Protocols/ (R200/M100, R2000, AsciiLine),
+│   │                                  # Llrp/ (cliente LLRP 1.0.1), ImpinjIot/ (REST do R700)
 │   └── KrfReader.UI/                  # App, MainWindow, ViewModels, CompositionRoot, Assets
 └── tests/KrfReader.Tests/             # Domain, Pipeline, Persistence, Readers, Integration, Fakes
 ```
@@ -106,6 +110,11 @@ KRF-Reader/
 | [Pipeline/ReadFilter.cs](src/KrfReader.Application/Pipeline/ReadFilter.cs) | Filtro de RSSI mínimo e antenas aceitas. |
 | [Readers/StreamRfidReaderBase.cs](src/KrfReader.Infrastructure/Readers/StreamRfidReaderBase.cs) | Base de serial/TCP: transporte, reconexão e threading. |
 | [Readers/Protocols/AsciiLineProtocol.cs](src/KrfReader.Infrastructure/Readers/Protocols/AsciiLineProtocol.cs) | Parser `EPC,RSSI,ANTENA[,TIMESTAMP]` com frames parciais. |
+| [Readers/Protocols/R2000Protocol.cs](src/KrfReader.Infrastructure/Readers/Protocols/R2000Protocol.cs) | Quadros `A0` do R2000: 0x89 (uma porta) ou 0x8A (troca rápida, até 4), potência por porta, região 915,5–927,5 MHz. |
+| [Readers/Llrp/LlrpReader.cs](src/KrfReader.Infrastructure/Readers/Llrp/LlrpReader.cs) | Driver LLRP: capacidades, checagem Anatel, ROSpec própria, keepalive, reconexão. |
+| [Readers/Llrp/LlrpProtocol.cs](src/KrfReader.Infrastructure/Readers/Llrp/LlrpProtocol.cs) | Montagem e leitura das mensagens LLRP (ROSpec, relatórios, capacidades, tabela de potência). |
+| [Readers/ImpinjIot/ImpinjIotReader.cs](src/KrfReader.Infrastructure/Readers/ImpinjIot/ImpinjIotReader.cs) | R700 pela IoT Device Interface: preset por porta, canais Anatel, fluxo NDJSON. |
+| [Readers/ReaderModelCatalog.cs](src/KrfReader.Infrastructure/Readers/ReaderModelCatalog.cs) | Catálogo de modelos exibido em CONFIGURAÇÕES. |
 | [Fakes/MockReader.cs](tests/KrfReader.Tests/Fakes/MockReader.cs) | Simulador usado só nos testes: população de tags, entrada e saída do campo, rajadas e leituras fantasma. |
 | [Persistence/SqliteInventoryRepository.cs](src/KrfReader.Infrastructure/Persistence/SqliteInventoryRepository.cs) | Aplica o lote numa transação: carrega estado, decide, faz upsert e insere eventos. |
 | [Persistence/SqliteInventoryRepository.Catalog.cs](src/KrfReader.Infrastructure/Persistence/SqliteInventoryRepository.Catalog.cs) | CRUD de `TagCadastro` e consulta de tags cadastradas com status e última detecção. |
@@ -139,6 +148,9 @@ KRF-Reader/
   <img src="docs/screenshots/configuracao.png" width="820" alt="KRF Reader: aba Configuração" />
   <br/><sub>Configuração do leitor e do filtro de leituras</sub>
   <br/><br/>
+  <img src="docs/screenshots/leitor-llrp.png" width="820" alt="KRF Reader: Zebra FX9600 por LLRP com 4 portas" />
+  <br/><sub>Leitor de rede: Zebra FX9600 por LLRP, 4 portas, potência por porta e exigência Anatel (sem leitor na rede)</sub>
+  <br/><br/>
   <img src="docs/screenshots/banco-sqlserver.png" width="820" alt="KRF Reader: card Banco de dados com SQL Server" />
   <br/><sub>Banco de dados: SQL Server Express testado e dados para o Power BI (senha ocultada)</sub>
 </div>
@@ -159,7 +171,10 @@ tag no leitor. A lista mostra status atual (DENTRO, FORA, NUNCA LIDA) e última 
 
 **CONFIGURAÇÃO.** Quatro partes:
 
-- *Leitor RFID*: tipo (Serial, Tcp), porta serial e baud, host e porta TCP, protocolo, potência e antenas ativas. Só vale após **Aplicar leitor**, que desconecta e reconecta. Exige modo PARADO.
+- *Leitor RFID*: modelo do catálogo, tipo (Serial, TCP/IP, LLRP, Impinj IoT), porta serial e baud, IP e porta, protocolo
+  (Serial/TCP), usuário/senha da API (Impinj IoT), potência, antenas ativas, potência por porta (`1:30; 2:27`) e
+  exigência da faixa 915–928 MHz. Só vale após **Aplicar leitor**, que desconecta e reconecta. Exige modo PARADO.
+  Leitores LLRP/REST se identificam ao conectar (modelo, firmware, portas, potência real e canais em uso).
 - *Filtro de leituras*: RSSI mínimo e antenas aceitas. Vale na hora, sem reconectar.
 - *Anticolisão · muitas tags*: session Gen2, target (A fixo ou A↔B), duração da rodada, Q inicial, Q dinâmico e prefixo de Select. Vale ao aplicar o leitor.
 - *Banco de dados*: SQLite ou SQL Server e a connection string. **Testar conexão** abre o servidor e diz se o banco já existe; **Salvar banco** grava em `appsettings.Local.json` e vale na próxima abertura. Mostra servidor e banco a digitar no Power BI. Ver [Power BI em tempo real](#power-bi-em-tempo-real).
@@ -380,6 +395,32 @@ dual target, S2/S3 em portal); Chao (1987) e Colwell & Coddington (1994) para o 
 2. Se o leitor fala **ASCII por linha** (`EPC,RSSI,ANTENA[,TIMESTAMP]`), basta configurar `Reader.Type` = `Serial`/`Tcp` com `Protocol` = `AsciiLine`.
 3. Ajuste `PowerDbm` e `Antennas`. Depois, com tags posicionadas **na borda da zona de interesse** e **logo fora dela**, observe o RSSI na lista ao vivo e calibre `MinRssi` entre os dois valores.
 
+### Leitores industriais
+
+| Leitor | Tipo | Porta | Como o app garante 915–928 MHz |
+|---|---|---|---|
+| Impinj R700 / R720 (interface IoT) | `ImpinjIot` | 443 | Envia `channelFrequenciesKhz` 915,25–927,25 MHz no preset |
+| Impinj R700 / Speedway / xArray (LLRP) | `Llrp` | 5084 | Só confere: recusa conectar se a tabela de salto tiver canal fora da faixa |
+| Zebra FX9600 / FX7500 | `Llrp` | 5084 | Só confere (configure o país Brasil na interface web do leitor) |
+| LLRP genérico (ThingMagic, Alien, Keonn...) | `Llrp` | 5084 | Só confere |
+| Chafon CF-RU5106 e R2000 de 4 portas | `Tcp`/`Serial` + `R2000` | 4001 | Envia região FCC com pontos 915,5–927,5 MHz (0x78) |
+
+- **LLRP:** ao conectar, lê portas, tabela de potência e frequências; escolhe o índice de potência mais alto que não
+  passa do pedido; aplica reset LLRP de fábrica + KEEPALIVE de 5 s; apaga ROSpecs existentes e instala uma própria (todas
+  as portas, Session e população Gen2, relatório por tag). Sem mensagem por 15 s = link morto, reconecta e retoma.
+  Só um cliente LLRP por leitor: o app recusa com mensagem se outro software estiver conectado.
+- **R700:** roda LLRP **ou** IoT Device Interface, nunca os dois (escolha na interface web). Num R700 em região FCC, só
+  o caminho REST restringe os canais; por LLRP o app recusa conectar com a exigência Anatel ligada.
+- **Chafon:** parte dos lotes sai com protocolo próprio da Chafon (CRC-16, demo UHFReader288), não com o R2000 `A0`. Se
+  não responder, confirme com o fornecedor.
+- **Q dinâmico e troca A/B pelo app** só existem no R200/M100. Nos demais, Session, target (dual/single, por
+  extensão Impinj no LLRP) e população inicial vão ao leitor na conexão e o leitor ajusta o Q.
+
+> [!CAUTION]
+> A senha da API do R700 fica em texto puro no `appsettings.Local.json`, e o certificado autoassinado de fábrica é
+> aceito por padrão (`AllowSelfSignedCertificate`), o que permite man-in-the-middle na rede. Troque a senha padrão,
+> isole os leitores em VLAN e, em produção, instale certificado confiável no leitor e desligue a opção.
+
 ### Novo driver
 
 Existem dois pontos de extensão, conforme o caso:
@@ -403,7 +444,7 @@ protocolFactory.Register("AcmeBinary", () => new AcmeBinaryProtocol());
 
 Depois disso, basta usar `"Protocol": "AcmeBinary"` no appsettings. `Feed` é stateful: guarda os bytes de frames incompletos entre as chamadas. Cada conexão recebe uma instância nova.
 
-**B. SDK do fabricante ou LLRP.** Implementa `IRfidReader` diretamente:
+**B. SDK do fabricante ou API própria** (como `LlrpReader` e `ImpinjIotReader`). Implementa `IRfidReader` diretamente:
 
 1. Crie `AcmeSdkReader : IRfidReader` em `Infrastructure/Readers/`. Converta o callback do SDK em `TagRead` com `Epc.Normalize` e timestamp **UTC** e dispare o evento `TagRead` sem bloquear, porque o pipeline só faz `TryWrite`.
 2. Garanta o contrato: métodos idempotentes, e `StopInventoryAsync` só retorna quando o SDK parou de entregar leituras.
@@ -440,7 +481,7 @@ repositório só carrega o estado dos EPCs e grava o plano numa transação.
 | Linguagem e runtime | C# (`LangVersion` latest), .NET 8, `Nullable` |
 | Interface | Avalonia 11.3 (Fluent, fonte Inter) + CommunityToolkit.Mvvm 8.4 |
 | Persistência | SQLite (Microsoft.Data.Sqlite 8.0) ou SQL Server 2016+ / Express (Microsoft.Data.SqlClient 6.0) + Dapper 2.1 |
-| Leitor | System.IO.Ports 8.0 (serial), `TcpClient` (rede), protocolos plugáveis |
+| Leitor | System.IO.Ports 8.0 (serial), `TcpClient` (rede), protocolos plugáveis; cliente LLRP 1.0.1 próprio; `HttpClient` (Impinj IoT REST) |
 | Concorrência | `System.Threading.Channels` (bounded) |
 | Configuração | Microsoft.Extensions.Configuration (JSON) + DependencyInjection + Logging |
 | Testes | xUnit 2.9 + Xunit.SkippableFact + Microsoft.Extensions.TimeProvider.Testing |
@@ -459,7 +500,7 @@ repositório só carrega o estado dos EPCs e grava o plano numa transação.
 ```bash
 git clone https://github.com/GZimbra/KRF-Reader.git && cd KRF-Reader
 dotnet run  --project src/KrfReader.UI        # conecta no R200 (COM3)
-dotnet test KrfReader.sln                     # 310 casos; os 39 de SQL Server pulam sem KRF_TEST_SQLSERVER
+dotnet test KrfReader.sln                     # 359 casos; os 39 de SQL Server pulam sem KRF_TEST_SQLSERVER
 dotnet publish src/KrfReader.UI -c Release -r win-x64   --self-contained -p:PublishSingleFile=true -o publish/win-x64
 dotnet publish src/KrfReader.UI -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true -o publish/linux-x64
 ```
@@ -477,12 +518,16 @@ Fontes (a última vence): `src/KrfReader.UI/appsettings.json` → `appsettings.L
 | Seção | Chave | Significado |
 |---|---|---|
 | `Reader` | `Model` | Perfil do catálogo (padrão `r200`) |
-| | `Type` | `Serial` ou `Tcp` |
+| | `Type` | `Serial`, `Tcp`, `Llrp` ou `ImpinjIot` |
 | | `Protocol` | Protocolo registrado para Serial/Tcp (padrão `R200`) |
 | | `Serial.PortName` / `BaudRate` / `DataBits` / `Parity` / `StopBits` | Porta serial |
-| | `Tcp.Host` / `Port` / `ConnectTimeoutMs` | Leitor em rede |
+| | `Tcp.Host` / `Port` / `ConnectTimeoutMs` | Leitor em rede (TCP, LLRP e Impinj IoT) |
 | | `PowerDbm` | Potência de transmissão (0–33 dBm). É o principal controle de alcance. |
 | | `Antennas` | Portas de antena ativas no leitor |
+| | `AntennaPowerDbm` | Potência por porta, sobrepondo `PowerDbm` (ex.: `{ "3": 27 }`) |
+| | `EnforceAnatelBand` | `true` (padrão): só opera em 915–928 MHz; recusa leitor LLRP que não garanta |
+| | `Llrp.KeepaliveMs` / `ResponseTimeoutMs` / `ResetToFactoryDefault` | Watchdog (5000), espera por resposta (5000), reset LLRP ao conectar (`true`) |
+| | `ImpinjIot.UseHttps` / `Username` / `Password` / `AllowSelfSignedCertificate` / `PresetId` | API REST do R700 (`root`/`impinj` de fábrica) |
 | | `ReconnectDelayMs` | Espera entre tentativas de reconexão automática |
 | `Pipeline` | `DedupWindowSeconds` | Janela de deduplicação |
 | | `MinRssi` | RSSI mínimo aceito (dBm). Filtro de leitura fantasma. |
@@ -511,7 +556,7 @@ Fontes (a última vence): `src/KrfReader.UI/appsettings.json` → `appsettings.L
 | `Domain/` | `InventoryRules.Decide` (tabela completa), normalização de EPC, validação do cadastro, literais do banco |
 | `Pipeline/` | Deduplicação por geração, filtro RSSI/antena, troca de modo, barreira de PARAR, shutdown, concorrência do estado de modo, captura para cadastro |
 | `Persistence/` | Mesma suíte (contratos) contra SQLite real e SQL Server real; mais migrador SQL Server, precisão de data, views do BI. SQLite: criação, mudança de status, idempotência, anomalia, lote de 2000 leituras, consultas, cadastro de tags, migrações (banco v0.4, rollback, versão futura), tags cadastradas, movimentações e passagens |
-| `Readers/` | Parser `AsciiLine` (frames parciais, lixo), factory de protocolos, MockReader (fake de teste), comandos Gen2 do M100 e troca de parâmetros pelo transporte |
+| `Readers/` | Parser `AsciiLine` (frames parciais, lixo), factory de protocolos, MockReader (fake de teste), comandos Gen2 do M100 e troca de parâmetros pelo transporte; R2000 multiporta e região; LLRP (codificação, capacidades, faixa Anatel, potência, relatórios) contra leitor LLRP falso em loopback (conexão, recusa, queda e reconexão, watchdog, extensão Impinj); Impinj IoT contra API REST falsa |
 | `Passage/` | Convergência, Chao2, silêncio, perda de dados; 50–100 tags no simulador Gen2 com Monte Carlo (400 passagens) |
 | `Integration/` | Ponta a ponta: leitor fake → pipeline → SQLite |
 
@@ -647,5 +692,18 @@ ANOMALIA exigiria regra para a leitura seguinte da tag e mudaria `InventoryRules
 O pipeline, o banco e os parsers foram testados com leitores fake e SQLite real. Com o R200 físico, a comunicação foi
 validada, mas a leitura de tags não (sem antena). Ao instalar a antena, o primeiro passo é confirmar a leitura e
 calibrar `PowerDbm` e `MinRssi` no portal real.
+
+</details>
+
+<details>
+<summary><b>Cliente LLRP próprio em vez de biblioteca</b></summary>
+
+<br/>
+
+O Octane SDK da Impinj é proprietário, não está no NuGet público e só fala com leitores Impinj; o LTK.NET (LLRP Toolkit)
+está parado desde a era .NET Framework. O app implementa só o subconjunto do LLRP 1.0.1 que usa (capacidades,
+SET_READER_CONFIG, ROSpec, relatórios, KEEPALIVE): cerca de 1.400 linhas, sem dependência, testadas contra um leitor
+falso. Custo: mensagens fora desse subconjunto (GPIO, AccessSpec de escrita, extensões Zebra) não existem até serem
+escritas, e a conferência com hardware real ainda falta.
 
 </details>

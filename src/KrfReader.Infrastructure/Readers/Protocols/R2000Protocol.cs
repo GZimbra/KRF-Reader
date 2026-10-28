@@ -17,11 +17,14 @@ namespace KrfReader.Infrastructure.Readers.Protocols;
 /// RSSI em dBm = (byte &amp; 0x7F) − 129. Antena = (FreqAnt &amp; 0x03) + 1.
 /// </para>
 /// <para>
-/// Limitação: só a primeira antena da lista é configurada como antena de trabalho (multiantena exige o
-/// comando 0x8A de troca rápida). NÃO validado em hardware neste projeto.
+/// Multiporta (<see cref="IMultiAntennaProtocol"/>): com uma porta ativa usa 0x74 (antena de trabalho) + 0x89; com
+/// duas ou mais, 0x8A (troca rápida de antena, portas 1–4, 1 ciclo por porta). Potência igual em todas as portas
+/// vai em 0x76 com 1 byte; potências diferentes vão em 0x76 com 4 bytes (uma por porta), aceito só por firmwares
+/// que suportam potência individual. Com faixa Anatel exigida, envia 0x78 região FCC com pontos 915,5–927,5 MHz.
+/// NÃO validado em hardware neste projeto.
 /// </para>
 /// </summary>
-public sealed class R2000Protocol : IReaderProtocol, IInventoryRefreshProtocol
+public sealed class R2000Protocol : IReaderProtocol, IInventoryRefreshProtocol, IMultiAntennaProtocol
 {
     public const string ProtocolName = "R2000";
     public const byte Head = 0xA0;
@@ -32,6 +35,18 @@ public sealed class R2000Protocol : IReaderProtocol, IInventoryRefreshProtocol
     internal const byte CmdSetWorkAntenna = 0x74;
     internal const byte CmdSetOutputPower = 0x76;
     internal const byte CmdRealTimeInventory = 0x89;
+    internal const byte CmdFastSwitchInventory = 0x8A;
+    internal const byte CmdSetFrequencyRegion = 0x78;
+
+    public const int MaxPorts = 4;
+
+    /// <summary>Região FCC no 0x78; os pontos de frequência seguem 902,0 + 0,5·(p − 7) MHz.</summary>
+    internal const byte RegionFcc = 0x01;
+    internal const byte AnatelStartPoint = 0x22; // 915,5 MHz
+    internal const byte AnatelEndPoint = 0x3A;   // 927,5 MHz
+
+    /// <summary>Portas ativas (1..4) da última configuração. Mais de uma = inventário 0x8A.</summary>
+    private int[] _ports = [1];
 
     private const byte InventoryRepeat = 0x05;
     private const byte RoundSummaryLength = 0x0A;
@@ -113,16 +128,59 @@ public sealed class R2000Protocol : IReaderProtocol, IInventoryRefreshProtocol
 
     public IReadOnlyList<byte[]> BuildConfigureCommands(double powerDbm, IReadOnlyCollection<int> antennas)
     {
-        var antenna = antennas is { Count: > 0 } ? Math.Clamp(antennas.Min(), 1, 4) : 1;
-        var power = (byte)Math.Round(Math.Clamp(powerDbm, MinPowerDbm, MaxPowerDbm));
-        return
-        [
-            BuildFrame(CmdSetWorkAntenna, [(byte)(antenna - 1)]),
-            BuildFrame(CmdSetOutputPower, [power]),
-        ];
+        var antenna = antennas is { Count: > 0 } ? Math.Clamp(antennas.Min(), 1, MaxPorts) : 1;
+        return BuildRadioCommands(new RadioSetup([new AntennaPort(antenna, powerDbm)], EnforceAnatelBand: false));
     }
 
-    public byte[] BuildStartInventoryCommand() => BuildFrame(CmdRealTimeInventory, [InventoryRepeat]);
+    public IReadOnlyList<byte[]> BuildRadioCommands(RadioSetup setup)
+    {
+        ArgumentNullException.ThrowIfNull(setup);
+        var ports = setup.Ports.Where(p => p.Port is >= 1 and <= MaxPorts).DistinctBy(p => p.Port).OrderBy(p => p.Port).ToArray();
+        if (ports.Length == 0)
+            ports = [new AntennaPort(1, setup.Ports.Count > 0 ? setup.Ports[0].PowerDbm : 20)];
+        _ports = ports.Select(p => p.Port).ToArray();
+
+        var commands = new List<byte[]>();
+        if (setup.EnforceAnatelBand)
+            commands.Add(BuildFrame(CmdSetFrequencyRegion, [RegionFcc, AnatelStartPoint, AnatelEndPoint]));
+        if (ports.Length == 1)
+            commands.Add(BuildFrame(CmdSetWorkAntenna, [(byte)(ports[0].Port - 1)]));
+
+        var powers = ports.Select(p => ToPowerByte(p.PowerDbm)).ToArray();
+        if (powers.Distinct().Count() == 1)
+        {
+            commands.Add(BuildFrame(CmdSetOutputPower, [powers[0]]));
+        }
+        else
+        {
+            // Portas inativas recebem a menor potência configurada (não transmitem no 0x8A, mas o comando exige 4 valores).
+            var perPort = Enumerable.Repeat(powers.Min(), MaxPorts).ToArray();
+            foreach (var p in ports)
+                perPort[p.Port - 1] = ToPowerByte(p.PowerDbm);
+            commands.Add(BuildFrame(CmdSetOutputPower, perPort));
+        }
+
+        return commands;
+    }
+
+    public byte[] BuildStartInventoryCommand()
+    {
+        if (_ports.Length <= 1)
+            return BuildFrame(CmdRealTimeInventory, [InventoryRepeat]);
+
+        // A Aloop B Bloop C Cloop D Dloop Interval Repeat; antena > 3 = pulada.
+        var data = new byte[2 * MaxPorts + 2];
+        for (var i = 0; i < MaxPorts; i++)
+        {
+            data[2 * i] = i < _ports.Length ? (byte)(_ports[i] - 1) : (byte)0xFF;
+            data[2 * i + 1] = 1;
+        }
+        data[^2] = 0;
+        data[^1] = 1;
+        return BuildFrame(CmdFastSwitchInventory, data);
+    }
+
+    private static byte ToPowerByte(double dbm) => (byte)Math.Round(Math.Clamp(dbm, MinPowerDbm, MaxPowerDbm));
 
     /// <summary>O inventário em tempo real termina sozinho ao fim das rodadas; basta não rearmar.</summary>
     public byte[] BuildStopInventoryCommand() => [];
@@ -153,7 +211,7 @@ public sealed class R2000Protocol : IReaderProtocol, IInventoryRefreshProtocol
     {
         read = default;
         var len = frame[1];
-        if (frame[3] != CmdRealTimeInventory || len == RoundSummaryLength || frame.Length < 2 + MinTagLength)
+        if (frame[3] is not (CmdRealTimeInventory or CmdFastSwitchInventory) || len == RoundSummaryLength || frame.Length < 2 + MinTagLength)
             return false;
 
         var freqAnt = frame[4];

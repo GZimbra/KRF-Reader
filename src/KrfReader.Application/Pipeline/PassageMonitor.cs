@@ -41,7 +41,8 @@ public sealed class PassageMonitor : IAsyncDisposable
         PassageOptions passage,
         double minRssi,
         ILogger<PassageMonitor>? logger = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        PackageDirectory? packages = null)
     {
         ArgumentNullException.ThrowIfNull(pipeline);
         ArgumentNullException.ThrowIfNull(reader);
@@ -53,7 +54,7 @@ public sealed class PassageMonitor : IAsyncDisposable
         _pipeline = pipeline;
         _reader = reader;
         _inventory = inventory;
-        _tracker = new PassageTracker(passage, minRssi);
+        _tracker = new PassageTracker(passage, minRssi, packages);
         _logger = (ILogger?)logger ?? NullLogger.Instance;
         _time = timeProvider ?? TimeProvider.System;
         _round = TimeSpan.FromMilliseconds(inventory.TargetDwellMs);

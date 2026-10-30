@@ -53,9 +53,9 @@ public sealed class SchemaMigratorTests : IDisposable
         await NewRepo().InitializeAsync();
 
         Assert.Equal(SchemaMigrator.LatestVersion, await UserVersionAsync());
-        foreach (var table in new[] { "Tags", "Eventos", "TagCadastro", "Passagens" })
+        foreach (var table in new[] { "Tags", "Eventos", "TagCadastro", "Passagens", "Embalagens", "EmbalagemEtiquetas" })
             Assert.True(await ObjectExistsAsync("table", table), table);
-        foreach (var view in new[] { "TagsCadastradas", "Movimentacoes" })
+        foreach (var view in new[] { "TagsCadastradas", "Movimentacoes", "EmbalagensCadastradas", "ItensEstoque" })
             Assert.True(await ObjectExistsAsync("view", view), view);
         foreach (var index in new[] { "IX_Eventos_EpcId_Timestamp", "IX_Eventos_Timestamp", "IX_Eventos_Modo_Timestamp", "IX_Passagens_Modo_Inicio" })
             Assert.True(await ObjectExistsAsync("index", index), index);
@@ -114,6 +114,46 @@ public sealed class SchemaMigratorTests : IDisposable
         Assert.Equal(TagStatus.Dentro, reg.Status);
 
         Assert.Equal(2, (await repo.QueryMovementsAsync(new())).Count);
+    }
+
+    [Fact]
+    public async Task Banco_v06_migra_para_embalagens_preservando_tags_eventos_e_passagens()
+    {
+        // Banco como a v0.5–v0.7 deixava: 0001 + 0002, user_version = 2.
+        await using (var conn = await OpenAsync())
+        {
+            await conn.ExecuteAsync(SchemaMigrator.Migrations[0].Sql);
+            await conn.ExecuteAsync(SchemaMigrator.Migrations[1].Sql);
+            await conn.ExecuteAsync("""
+                PRAGMA user_version = 2;
+                INSERT INTO Tags VALUES ('E280AA01', 'DENTRO', '2026-01-01T10:00:00.000Z', '2026-01-01T10:00:00.000Z', 1, -50);
+                INSERT INTO Tags VALUES ('E280AA02', 'FORA',   '2026-01-02T10:00:00.000Z', '2026-01-02T10:00:00.000Z', 2, -55);
+                INSERT INTO Eventos (EpcId, Modo, Tipo, Timestamp, AntenaId, Rssi)
+                    VALUES ('E280AA01', 'ENTRADA', 'CRIACAO', '2026-01-01T10:00:00.000Z', 1, -50);
+                INSERT INTO Eventos (EpcId, Modo, Tipo, Timestamp, AntenaId, Rssi)
+                    VALUES ('E280AA02', 'SAIDA', 'SAIDA_SEM_ENTRADA', '2026-01-02T10:00:00.000Z', 2, -55);
+                INSERT INTO TagCadastro (EpcId, Descricao, Sku, Observacao, CadastradoEm, AtualizadoEm)
+                    VALUES ('E280AA01', 'Palete', 'SKU-1', NULL, '2026-01-01T09:00:00.000Z', '2026-01-01T09:00:00.000Z');
+                INSERT INTO Passagens (Modo, InicioUtc, FimUtc, Tags, Leituras, Rodadas, EstimativaPerdidas, Veredito)
+                    VALUES ('ENTRADA', '2026-01-01T09:59:59.000Z', '2026-01-01T10:00:01.000Z', 1, 10, 4, 0, 'CONFIAVEL');
+                """);
+        }
+
+        var repo = NewRepo();
+        await repo.InitializeAsync();
+
+        Assert.Equal(SchemaMigrator.LatestVersion, await UserVersionAsync());
+        var c = await repo.GetCountersAsync();
+        Assert.Equal((1, 1, 1), (c.Dentro, c.Fora, c.Anomalias));
+
+        var movements = await repo.QueryMovementsAsync(new());
+        Assert.Equal(2, movements.Count);
+        Assert.All(movements, m => Assert.Null(m.EmbalagemId));
+        Assert.Equal(1, movements.Single(m => m.Epc == "E280AA01").PassagemId);
+        Assert.Equal("Palete", movements.Single(m => m.Epc == "E280AA01").Descricao);
+
+        var reg = Assert.Single(await repo.QueryRegisteredTagsAsync(null));
+        Assert.Equal(TagStatus.Dentro, reg.Status);
     }
 
     [Fact]

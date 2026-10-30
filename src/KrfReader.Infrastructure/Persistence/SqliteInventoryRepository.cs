@@ -15,7 +15,7 @@ namespace KrfReader.Infrastructure.Persistence;
 /// Uma conexão nova por operação (o provider faz pooling). Thread-safe: não guarda estado mutável.
 /// Também implementa <see cref="ITagCatalogRepository"/> (SqliteInventoryRepository.Catalog.cs): mesmo banco e schema.
 /// </summary>
-public sealed partial class SqliteInventoryRepository : IInventoryRepository, ITagCatalogRepository
+public sealed partial class SqliteInventoryRepository : IInventoryRepository, ITagCatalogRepository, IPackageCatalogRepository
 {
     /// <summary>Limite de parâmetros por SELECT ... IN (...).</summary>
     internal const int InClauseChunkSize = 500;
@@ -43,8 +43,32 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
         """;
 
     private const string InsertEventSql = """
-        INSERT INTO Eventos (EpcId, Modo, Tipo, Timestamp, AntenaId, Rssi)
-        VALUES (@EpcId, @Modo, @Tipo, @Timestamp, @AntenaId, @Rssi)
+        INSERT INTO Eventos (EpcId, Modo, Tipo, Timestamp, AntenaId, Rssi, EmbalagemId)
+        VALUES (@EpcId, @Modo, @Tipo, @Timestamp, @AntenaId, @Rssi, @EmbalagemId)
+        """;
+
+    private const string SelectPackagesSql = """
+        SELECT ee.EpcId, em.Id, em.Codigo, em.Status,
+               (SELECT COUNT(*) FROM EmbalagemEtiquetas x WHERE x.EmbalagemId = em.Id) AS Etiquetas
+        FROM EmbalagemEtiquetas ee
+        JOIN Embalagens em ON em.Id = ee.EmbalagemId
+        WHERE ee.EpcId IN @Epcs
+        """;
+
+    // Última detecção nunca retrocede; antena/RSSI/EPC acompanham a leitura que a define. No SET, colunas = valor ANTES.
+    // O segundo comando alinha o status das etiquetas da embalagem que não foram lidas neste lote.
+    internal const string UpdatePackageSql = """
+        UPDATE Embalagens SET
+            UltimaEpcId = CASE WHEN UltimaDeteccao IS NULL OR @UltimaDeteccao >= UltimaDeteccao THEN @UltimaEpcId ELSE UltimaEpcId END,
+            UltimaAntenaId = CASE WHEN UltimaDeteccao IS NULL OR @UltimaDeteccao >= UltimaDeteccao THEN @UltimaAntenaId ELSE UltimaAntenaId END,
+            UltimaRssi = CASE WHEN UltimaDeteccao IS NULL OR @UltimaDeteccao >= UltimaDeteccao THEN @UltimaRssi ELSE UltimaRssi END,
+            UltimaDeteccao = CASE WHEN UltimaDeteccao IS NULL OR @UltimaDeteccao > UltimaDeteccao THEN @UltimaDeteccao ELSE UltimaDeteccao END,
+            Status = CASE WHEN @StatusChanged = 1 THEN @Status ELSE Status END,
+            UltimaAtualizacaoStatus = CASE WHEN @StatusChanged = 1 THEN @UltimaAtualizacaoStatus ELSE UltimaAtualizacaoStatus END
+        WHERE Id = @Id;
+        UPDATE Tags SET Status = @Status, UltimaAtualizacaoStatus = @UltimaAtualizacaoStatus
+        WHERE @StatusChanged = 1 AND Status <> @Status
+          AND EpcId IN (SELECT EpcId FROM EmbalagemEtiquetas WHERE EmbalagemId = @Id);
         """;
 
     private readonly string _connectionString;
@@ -93,7 +117,8 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
         try
         {
             var state = await LoadStatusAsync(connection, transaction, epcs, cancellationToken).ConfigureAwait(false);
-            var plan = BatchPlanner.Build(mode, reads, epcs, state);
+            var packages = await LoadPackagesAsync(connection, transaction, epcs, cancellationToken).ConfigureAwait(false);
+            var plan = BatchPlanner.Build(mode, reads, epcs, state, packages);
 
             var upserts = plan.Upserts.Select(u => new TagUpsertRow
             {
@@ -113,12 +138,26 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
                 Timestamp = DbTimestamp.ToDb(e.Timestamp),
                 AntenaId = e.AntenaId,
                 Rssi = e.Rssi,
+                EmbalagemId = e.EmbalagemId,
+            }).ToList();
+            var packageUpdates = plan.PackageUpdates.Select(u => new
+            {
+                u.Id,
+                Status = u.Status.ToDb(),
+                StatusChanged = u.StatusChanged ? 1 : 0,
+                UltimaAtualizacaoStatus = DbTimestamp.ToDb(u.UltimaAtualizacaoStatus),
+                UltimaDeteccao = DbTimestamp.ToDb(u.UltimaDeteccao),
+                u.UltimaEpcId,
+                u.UltimaAntenaId,
+                u.UltimaRssi,
             }).ToList();
 
             // Tags antes de Eventos por causa da FK.
             await connection.ExecuteAsync(new CommandDefinition(UpsertTagSql, upserts, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
             if (events.Count > 0)
                 await connection.ExecuteAsync(new CommandDefinition(InsertEventSql, events, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
+            if (packageUpdates.Count > 0)
+                await connection.ExecuteAsync(new CommandDefinition(UpdatePackageSql, packageUpdates, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -146,8 +185,8 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
     {
         const string sql = """
             SELECT
-                (SELECT COUNT(*) FROM Tags WHERE Status = @Dentro) AS Dentro,
-                (SELECT COUNT(*) FROM Tags WHERE Status = @Fora) AS Fora,
+                (SELECT COUNT(*) FROM ItensEstoque WHERE Status = @Dentro) AS Dentro,
+                (SELECT COUNT(*) FROM ItensEstoque WHERE Status = @Fora) AS Fora,
                 (SELECT COUNT(*) FROM Eventos WHERE Tipo = @Anomalia) AS Anomalias
             """;
 
@@ -168,17 +207,22 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
             return [];
 
         var term = string.IsNullOrWhiteSpace(search) ? null : search.Trim().ToUpperInvariant();
-        // LEFT JOIN: tag lida sem cadastro aparece com Descricao/Sku nulos.
+        // LEFT JOIN: tag lida sem cadastro aparece com Descricao/Sku nulos. Etiqueta de embalagem traz a descrição
+        // (ou o código) da embalagem; o status da linha já acompanha o da embalagem (ApplyBatchAsync).
         var sql = """
             SELECT t.EpcId, t.Status, t.UltimaLeitura, t.UltimaAtualizacaoStatus, t.UltimaAntenaId, t.UltimaRssi,
-                   c.Descricao, c.Sku
+                   COALESCE(em.Descricao, em.Codigo, c.Descricao) AS Descricao, c.Sku, em.Codigo AS EmbalagemCodigo
             FROM Tags t
             LEFT JOIN TagCadastro c ON c.EpcId = t.EpcId
+            LEFT JOIN EmbalagemEtiquetas ee ON ee.EpcId = t.EpcId
+            LEFT JOIN Embalagens em ON em.Id = ee.EmbalagemId
             WHERE (@Status IS NULL OR t.Status = @Status)
               AND (@Pattern IS NULL
                    OR t.EpcId LIKE @Pattern ESCAPE '\'
                    OR c.Descricao LIKE @Pattern ESCAPE '\'
-                   OR c.Sku LIKE @Pattern ESCAPE '\')
+                   OR c.Sku LIKE @Pattern ESCAPE '\'
+                   OR em.Codigo LIKE @Pattern ESCAPE '\'
+                   OR em.Descricao LIKE @Pattern ESCAPE '\')
             ORDER BY t.UltimaLeitura DESC
             LIMIT @Limit
             """;
@@ -199,7 +243,8 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
             r.Descricao,
             r.Sku,
             r.UltimaAntenaId is { } antena ? checked((int)antena) : null,
-            r.UltimaRssi)).ToList();
+            r.UltimaRssi,
+            r.EmbalagemCodigo)).ToList();
     }
 
     public async Task<IReadOnlyList<InventoryEvent>> GetEventsAsync(string epc, int limit = 200, CancellationToken cancellationToken = default)
@@ -270,6 +315,31 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
         return state;
     }
 
+    private static async Task<Dictionary<string, BatchPlanner.PackageState>> LoadPackagesAsync(
+        SqliteConnection connection, IDbTransaction transaction, string[] epcs, CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<string, BatchPlanner.PackageState>(StringComparer.Ordinal);
+        var byId = new Dictionary<long, BatchPlanner.PackageState>();
+        foreach (var chunk in epcs.Distinct(StringComparer.Ordinal).Chunk(InClauseChunkSize))
+        {
+            var rows = await connection.QueryAsync<PackageLinkRow>(new CommandDefinition(
+                SelectPackagesSql, new { Epcs = chunk }, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
+            foreach (var row in rows)
+            {
+                // Uma instância por embalagem: as etiquetas compartilham o status durante o plano.
+                if (!byId.TryGetValue(row.Id, out var package))
+                {
+                    package = new BatchPlanner.PackageState(
+                        new PackageRef(row.Id, row.Codigo, checked((int)row.Etiquetas)),
+                        row.Status is null ? null : DbLiterals.ParseStatus(row.Status));
+                    byId[row.Id] = package;
+                }
+                result[row.EpcId] = package;
+            }
+        }
+        return result;
+    }
+
     internal static string EscapeLike(string term) =>
         term.Replace(@"\", @"\\", StringComparison.Ordinal)
             .Replace("%", @"\%", StringComparison.Ordinal)
@@ -296,6 +366,15 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
         public string Status { get; init; } = "";
     }
 
+    private sealed record PackageLinkRow
+    {
+        public string EpcId { get; init; } = "";
+        public long Id { get; init; }
+        public string Codigo { get; init; } = "";
+        public string? Status { get; init; }
+        public long Etiquetas { get; init; }
+    }
+
     private sealed record TagRow
     {
         public string EpcId { get; init; } = "";
@@ -306,6 +385,7 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
         public double? UltimaRssi { get; init; }
         public string? Descricao { get; init; }
         public string? Sku { get; init; }
+        public string? EmbalagemCodigo { get; init; }
     }
 
     private sealed record TagUpsertRow
@@ -328,6 +408,7 @@ public sealed partial class SqliteInventoryRepository : IInventoryRepository, IT
         public string Timestamp { get; init; } = "";
         public long AntenaId { get; init; }
         public double Rssi { get; init; }
+        public long? EmbalagemId { get; init; }
     }
 
     private sealed record CountersRow

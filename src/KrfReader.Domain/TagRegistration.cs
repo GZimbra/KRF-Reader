@@ -65,22 +65,8 @@ public static class TagRegistrationRules
         ArgumentNullException.ThrowIfNull(input);
         result = null;
 
-        var epc = KrfReader.Domain.Epc.Normalize(input.Epc);
-        if (string.IsNullOrWhiteSpace(input.Epc))
-        {
-            error = "Informe o EPC.";
+        if (!TryValidateEpc(input.Epc, out var epc, out error))
             return false;
-        }
-        if (epc is null)
-        {
-            error = "EPC inválido: use apenas dígitos hexadecimais (0-9, A-F).";
-            return false;
-        }
-        if (epc.Length < MinEpcHexLength || epc.Length > MaxEpcHexLength || epc.Length % 4 != 0)
-        {
-            error = $"EPC com {epc.Length} dígitos: o tamanho deve ser múltiplo de 4, entre {MinEpcHexLength} e {MaxEpcHexLength} (EPC-96 = 24 dígitos).";
-            return false;
-        }
 
         var descricao = input.Descricao?.Trim();
         if (string.IsNullOrEmpty(descricao))
@@ -134,11 +120,39 @@ public static class TagRegistrationRules
         return true;
     }
 
+    /// <summary>
+    /// Valida e normaliza só o EPC (mesma regra do cadastro de tag e das etiquetas de embalagem).
+    /// </summary>
+    public static bool TryValidateEpc(string? raw, out string epc, out string error)
+    {
+        epc = "";
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            error = "Informe o EPC.";
+            return false;
+        }
+        var normalized = KrfReader.Domain.Epc.Normalize(raw);
+        if (normalized is null)
+        {
+            error = "EPC inválido: use apenas dígitos hexadecimais (0-9, A-F).";
+            return false;
+        }
+        if (normalized.Length < MinEpcHexLength || normalized.Length > MaxEpcHexLength || normalized.Length % 4 != 0)
+        {
+            error = $"EPC com {normalized.Length} dígitos: o tamanho deve ser múltiplo de 4, entre {MinEpcHexLength} e {MaxEpcHexLength} (EPC-96 = 24 dígitos).";
+            return false;
+        }
+
+        epc = normalized;
+        error = "";
+        return true;
+    }
+
     /// <summary>Como <see cref="TryValidate"/>, mas lança <see cref="ArgumentException"/>.</summary>
     public static ValidTagRegistration Validate(TagRegistrationInput input) =>
         TryValidate(input, out var result, out var error) ? result! : throw new ArgumentException(error, nameof(input));
 
-    private static string? NullIfEmpty(string? value)
+    internal static string? NullIfEmpty(string? value)
     {
         var trimmed = value?.Trim();
         return string.IsNullOrEmpty(trimmed) ? null : trimmed;

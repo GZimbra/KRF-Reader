@@ -31,6 +31,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private static readonly TimeSpan CaptureWindow = TimeSpan.FromMilliseconds(1500);
 
     private readonly IInventoryRepository _repository;
+    private readonly IPackageCatalogRepository _packages;
+    private readonly PackageDirectory _packageDirectory;
     private readonly Func<ReaderOptions, PipelineHandle> _pipelineFactory;
     private readonly Func<ReaderOptions, Task> _saveReaderOptions;
     private readonly ReaderOptions _baseReaderOptions;
@@ -52,6 +54,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     public MainWindowViewModel(
         IInventoryRepository repository,
         ITagCatalogRepository catalog,
+        IPackageCatalogRepository packages,
+        PackageDirectory packageDirectory,
         IReaderProtocolFactory protocolFactory,
         IReaderModelCatalog readerModels,
         Func<ReaderOptions, PipelineHandle> pipelineFactory,
@@ -62,11 +66,15 @@ public sealed partial class MainWindowViewModel : ObservableObject
         DatabaseSettingsViewModel banco)
     {
         _repository = repository;
+        _packages = packages;
+        _packageDirectory = packageDirectory;
         _pipelineFactory = pipelineFactory;
         _saveReaderOptions = saveReaderOptions;
         _baseReaderOptions = readerOptions;
         _pipelineOptions = pipelineOptions;
-        Cadastro = new TagCatalogViewModel(catalog, CaptureForCatalogAsync);
+        Cadastro = new TagCatalogViewModel(catalog, () => CaptureForCatalogAsync(Cadastro!.ReportCaptureUnavailable));
+        Embalagens = new PackageCatalogViewModel(
+            packages, () => CaptureForCatalogAsync(Embalagens!.ReportCaptureUnavailable), RefreshPackageDirectoryAsync);
         Movimentacoes = new StockMovementsViewModel(repository);
         Banco = banco;
 
@@ -193,6 +201,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     public const int MovimentacoesTabIndex = 2;
     public const int CadastroTabIndex = 3;
+    public const int EmbalagensTabIndex = 4;
 
     [ObservableProperty] private int _selectedTabIndex;
 
@@ -205,6 +214,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
             _ = Movimentacoes.LoadAsync();
         else if (value == CadastroTabIndex)
             _ = Cadastro.LoadAsync();
+        else if (value == EmbalagensTabIndex)
+            _ = Embalagens.LoadAsync();
     }
 
     public StockMovementsViewModel Movimentacoes { get; }
@@ -253,14 +264,38 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     partial void OnSelectedTagChanged(TagRowItem? value) => _ = LoadHistoryAsync(value);
 
-    /// <summary>Abre a tag selecionada na aba Cadastro (novo cadastro ou edição, se já cadastrada).</summary>
+    /// <summary>
+    /// Abre a tag selecionada no cadastro: etiqueta de embalagem abre a embalagem na aba Embalagens; as demais, a aba
+    /// Cadastro (novo cadastro ou edição, se já cadastrada).
+    /// </summary>
     [RelayCommand]
     private async Task RegisterSelectedTagAsync()
     {
         if (SelectedTag is not { } tag)
             return;
+        if (tag.IsPackageTag)
+        {
+            SelectedTabIndex = EmbalagensTabIndex;
+            if (await Embalagens.OpenByEpcAsync(tag.Epc))
+                return;
+        }
         SelectedTabIndex = CadastroTabIndex;
         await Cadastro.OpenEpcAsync(tag.Epc);
+    }
+
+    // ───────────────────────── Embalagens ─────────────────────────
+
+    public PackageCatalogViewModel Embalagens { get; }
+
+    /// <summary>
+    /// Recarrega o mapa EPC → embalagem usado pela passagem (veredito por item). Chamado ao abrir o banco e após
+    /// gravar/remover embalagem. A movimentação no banco não depende dele: o lote resolve a embalagem na transação.
+    /// </summary>
+    private async Task RefreshPackageDirectoryAsync()
+    {
+        var map = await Task.Run(() => _packages.GetPackageEpcMapAsync());
+        _packageDirectory.Replace(map);
+        Interlocked.Exchange(ref _countersDirty, 1);
     }
 
     // ───────────────────────── Cadastro ─────────────────────────
@@ -269,20 +304,20 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     /// <summary>
     /// Captura para o cadastro. Usa o mesmo lock de troca de modo/leitor: com a captura rodando, ENTRADA/SAÍDA
-    /// ficam bloqueados, e vice-versa. Retorna null (com o motivo na aba Cadastro) quando não pode capturar.
+    /// ficam bloqueados, e vice-versa. Retorna null (com o motivo na aba que pediu) quando não pode capturar.
     /// </summary>
-    private async Task<TagCaptureResult?> CaptureForCatalogAsync()
+    private async Task<TagCaptureResult?> CaptureForCatalogAsync(Action<string> reportUnavailable)
     {
         if (ActiveMode is not null)
         {
-            Cadastro.ReportCaptureUnavailable(
+            reportUnavailable(
                 $"Modo {Display.Mode(ActiveMode)} ativo: a leitura seria gravada no estoque. Pressione PARAR na aba Operação antes de ler para cadastro.");
             return null;
         }
 
         if (!await _lifecycleLock.WaitAsync(0))
         {
-            Cadastro.ReportCaptureUnavailable("Leitor ocupado (troca de modo ou de leitor em andamento). Tente de novo.");
+            reportUnavailable("Leitor ocupado (troca de modo ou de leitor em andamento). Tente de novo.");
             return null;
         }
 
@@ -292,7 +327,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             var handle = _current;
             if (handle is null || !IsPipelineRunning || _shutdownStarted)
             {
-                Cadastro.ReportCaptureUnavailable("Leitor não conectado. Verifique a aba Configuração.");
+                reportUnavailable("Leitor não conectado. Verifique a aba Configuração.");
                 return null;
             }
 
@@ -787,6 +822,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
         {
             await Task.Run(() => _repository.InitializeAsync());
             _repositoryReady = true;
+            try
+            {
+                await RefreshPackageDirectoryAsync();
+            }
+            catch (Exception ex)
+            {
+                ReportError($"Embalagens não carregadas (a passagem conta cada etiqueta como item): {ex.Message}");
+            }
             return true;
         }
         catch (Exception ex)

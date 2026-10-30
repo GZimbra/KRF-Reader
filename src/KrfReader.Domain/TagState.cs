@@ -5,6 +5,7 @@ namespace KrfReader.Domain;
 /// <param name="Sku">SKU do cadastro; null = não cadastrada ou sem SKU.</param>
 /// <param name="UltimaAntenaId">Antena da última detecção; null = banco anterior à v0.5 sem leitura nova.</param>
 /// <param name="UltimaRssi">RSSI da última detecção (dBm); null idem.</param>
+/// <param name="EmbalagemCodigo">Embalagem a que a etiqueta pertence; null = tag avulsa. Status, então, é o da embalagem.</param>
 public sealed record TagState(
     string Epc,
     TagStatus Status,
@@ -13,7 +14,8 @@ public sealed record TagState(
     string? Descricao = null,
     string? Sku = null,
     int? UltimaAntenaId = null,
-    double? UltimaRssi = null)
+    double? UltimaRssi = null,
+    string? EmbalagemCodigo = null)
 {
     public bool IsRegistered => Descricao is not null;
 }

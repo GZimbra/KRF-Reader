@@ -28,6 +28,7 @@ public sealed class LiveReadItem
     {
         Time = Display.LocalTime(applied.Read.TimestampUtc, "HH:mm:ss.fff");
         Epc = applied.Read.Epc;
+        Label = applied.Package is { } package ? $"{package.Codigo} · {Epc}" : Epc;
         Antenna = applied.Read.AntennaId;
         Rssi = Display.Rssi(applied.Read.Rssi);
         RssiValue = applied.Read.Rssi;
@@ -44,6 +45,9 @@ public sealed class LiveReadItem
 
     public string Time { get; }
     public string Epc { get; }
+
+    /// <summary>EPC, precedido do código da embalagem quando a tag é etiqueta de embalagem.</summary>
+    public string Label { get; }
     public int Antenna { get; }
     public string Rssi { get; }
     public double RssiValue { get; }
@@ -55,8 +59,11 @@ public sealed class LiveReadItem
 public sealed class TagRowItem(TagState state)
 {
     public string Epc { get; } = state.Epc;
-    public string Descricao { get; } = state.Descricao ?? "não cadastrada";
+    public string Descricao { get; } = state.EmbalagemCodigo is { } codigo
+        ? state.Descricao is { } d && d != codigo ? $"{codigo} · {d}" : codigo
+        : state.Descricao ?? "não cadastrada";
     public bool IsRegistered { get; } = state.IsRegistered;
+    public bool IsPackageTag { get; } = state.EmbalagemCodigo is not null;
     public string Status { get; } = Display.Status(state.Status);
     public bool IsDentro { get; } = state.Status == TagStatus.Dentro;
     public string UltimaLeitura { get; } = Display.LocalTime(state.UltimaLeituraUtc, "dd/MM/yyyy HH:mm:ss");
@@ -86,8 +93,11 @@ public sealed class MovementRowItem(StockMovement m)
     public string Tipo { get; } = Display.Mode(m.Tipo);
     public bool IsEntrada { get; } = m.Tipo == OperationMode.Entrada;
     public string Epc { get; } = m.Epc;
-    public string Item { get; } = m.Descricao is null ? "não cadastrada" : m.Sku is null ? m.Descricao : $"{m.Sku} · {m.Descricao}";
-    public bool IsRegistered { get; } = m.Descricao is not null;
+    public string Item { get; } = m.EmbalagemCodigo is { } codigo
+        ? m.Descricao is { } d && d != codigo ? $"{codigo} · {d}" : codigo
+        : m.EmbalagemId is not null ? "embalagem removida"
+        : m.Descricao is null ? "não cadastrada" : m.Sku is null ? m.Descricao : $"{m.Sku} · {m.Descricao}";
+    public bool IsRegistered { get; } = m.Descricao is not null || m.EmbalagemCodigo is not null;
     public string Evento { get; } = m.Evento switch
     {
         EventType.Criacao => "1ª entrada",

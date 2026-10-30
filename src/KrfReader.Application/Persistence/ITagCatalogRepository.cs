@@ -9,7 +9,10 @@ namespace KrfReader.Application.Persistence;
 /// </summary>
 public interface ITagCatalogRepository
 {
-    /// <summary>Insere. Retorna <c>false</c> se o EPC já está cadastrado (nada é alterado).</summary>
+    /// <summary>
+    /// Insere. Retorna <c>false</c> se o EPC já está cadastrado (nada é alterado). Lança
+    /// <see cref="InvalidOperationException"/> se o EPC é etiqueta de embalagem (<see cref="IPackageCatalogRepository"/>).
+    /// </summary>
     Task<bool> AddRegistrationAsync(TagRegistrationInput input, CancellationToken cancellationToken = default);
 
     /// <summary>Atualiza descrição/SKU/observação. Retorna <c>false</c> se o EPC não está cadastrado.</summary>
@@ -24,7 +27,7 @@ public interface ITagCatalogRepository
     Task<IReadOnlyList<TagRegistration>> QueryRegistrationsAsync(string? term, int limit = 500, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Tags cadastradas com status atual e última detecção (view <c>TagsCadastradas</c>).
+    /// Tags avulsas cadastradas com status atual e última detecção (view <c>TagsCadastradas</c>, sem as etiquetas de embalagem).
     /// Busca parcial em EPC, descrição, SKU, categoria e localização. Ordem: última detecção mais recente;
     /// nunca lidas no fim, por EPC.
     /// </summary>

@@ -24,6 +24,7 @@ public sealed partial class SqliteInventoryRepository
             """;
 
         await using var connection = await OpenAsync(cancellationToken).ConfigureAwait(false);
+        await EnsureNotPackageTagAsync(connection, null, valid.Epc, cancellationToken).ConfigureAwait(false);
         var rows = await connection.ExecuteAsync(new CommandDefinition(sql, new
         {
             EpcId = valid.Epc,
@@ -143,6 +144,7 @@ public sealed partial class SqliteInventoryRepository
                    Status, UltimaDeteccao, UltimaAntenaId, UltimaRssi
             FROM TagsCadastradas
             WHERE {{statusCondition}}
+              AND EmbalagemId IS NULL
               AND (@Pattern IS NULL
                    OR EpcId LIKE @Pattern ESCAPE '\'
                    OR Descricao LIKE @Pattern ESCAPE '\'

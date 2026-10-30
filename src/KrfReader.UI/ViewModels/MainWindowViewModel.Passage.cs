@@ -156,20 +156,22 @@ public sealed partial class MainWindowViewModel
         IsVerdictBad = s.Verdict == PassageVerdict.DadosIncompletos || (!live && s.Verdict == PassageVerdict.NaoConvergiu);
         VerdictHint = (live, s.Verdict) switch
         {
-            (true, PassageVerdict.NaoConvergiu) => "Ainda aparecem EPCs novos. Mantenha a carga no campo.",
+            (true, PassageVerdict.NaoConvergiu) => "Ainda aparecem itens novos. Mantenha a carga no campo.",
             (true, PassageVerdict.Confiavel) => "Descoberta convergiu. A carga pode seguir.",
             (_, PassageVerdict.Confiavel) => "Todas as tags que responderam foram lidas e a descoberta convergiu.",
             (_, PassageVerdict.Atencao) => "Convergiu, mas há tag com leitura marginal. Conferir ou repassar.",
-            (_, PassageVerdict.NaoConvergiu) => "A carga saiu enquanto apareciam tags novas. Repassar a carga.",
+            (_, PassageVerdict.NaoConvergiu) => "A carga saiu enquanto apareciam itens novos. Repassar a carga.",
             _ => "Leituras perdidas fora do RF. Repassar a carga.",
         };
 
-        PassageTagCount = s.DistinctTags;
+        PassageTagCount = s.DistinctItems;
         PassageStableText = $"{s.StableRounds}/{_requiredStableRounds}";
         PassageMissedText = s.EstimatedMissed.ToString("0.0", CultureInfo.CurrentCulture);
         PassageReads = s.TotalReads;
         PassageDetailText =
-            $"rodadas {s.Rounds} · novas na última {s.NewInLastRound} · responderam {s.RespondingLastRound} · " +
+            $"etiquetas {s.DistinctTags} · embalagens {s.Packages}" +
+            (s.PartialPackages > 0 ? $" ({s.PartialPackages} com etiqueta não lida)" : "") + " · " +
+            $"rodadas {s.Rounds} · novos na última {s.NewInLastRound} · responderam {s.RespondingLastRound} · " +
             $"marginais {s.MarginalTags} · {s.Duration.TotalSeconds.ToString("0.0", CultureInfo.CurrentCulture)} s";
         PassageIssuesText = string.Join("  ", s.Issues);
         PassageTags = s.Tags.Select(t => new PassageTagRow(t)).ToArray();
@@ -215,7 +217,7 @@ public sealed partial class MainWindowViewModel
 /// <summary>Linha da tabela de tags da passagem.</summary>
 public sealed class PassageTagRow(PassageTag tag)
 {
-    public string Epc { get; } = tag.Epc;
+    public string Epc { get; } = tag.PackageCodigo is { } codigo ? $"{codigo} · {tag.Epc}" : tag.Epc;
     public int Reads { get; } = tag.Reads;
     public int Rounds { get; } = tag.Rounds;
     public string MaxRssi { get; } = Display.Rssi(tag.MaxRssi);

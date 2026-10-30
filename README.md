@@ -11,14 +11,14 @@
     <img src="https://img.shields.io/badge/Banco-SQLite%20%7C%20SQL%20Server%20%2B%20Dapper-003B57?style=flat-square&amp;logo=sqlite&amp;logoColor=white" alt="SQLite ou SQL Server com Dapper" />
     <img src="https://img.shields.io/badge/Leitor-R200%20%7C%20R2000%20%7C%20LLRP%20%7C%20Impinj%20IoT-191919?style=flat-square" alt="Leitor R200, R2000, LLRP ou Impinj IoT" />
     <img src="https://img.shields.io/badge/Plataformas-Windows%20%7C%20Linux%20%7C%20macOS-555555?style=flat-square" alt="Windows, Linux e macOS" />
-    <img src="https://img.shields.io/badge/Testes-359%20casos%20xUnit-2E7D32?style=flat-square" alt="359 casos de teste xUnit" />
+    <img src="https://img.shields.io/badge/Testes-403%20casos%20xUnit-2E7D32?style=flat-square" alt="403 casos de teste xUnit" />
   </p>
 </div>
 
 > [!WARNING]
 > O app não tem modo simulado: ele sobe conectando no leitor **R200** (COM3, 115200, 915–928 MHz). Com o R200 real
 > foram validados identificação, potência, região/canais, início e parada do inventário. **A leitura de tags com
-> hardware real nunca foi validada**: o leitor foi testado sem antena. O pipeline foi coberto por 359 testes
+> hardware real nunca foi validada**: o leitor foi testado sem antena. O pipeline foi coberto por 403 testes
 > automatizados, que usam um simulador que só existe no projeto de testes.
 > Os drivers de leitores industriais (**LLRP** para Impinj R700/Speedway e Zebra FX9600/FX7500, **Impinj IoT REST**
 > para o R700, **R2000 multiporta** para Chafon CF-RU5106 e similares) seguem as especificações publicadas e foram
@@ -35,6 +35,7 @@
   - [Interface gráfica](#interface-gráfica)
   - [Regras de negócio](#regras-de-negócio)
   - [Cadastro de tags](#cadastro-de-tags)
+  - [Embalagens com várias etiquetas](#embalagens-com-várias-etiquetas)
   - [Banco de dados](#banco-de-dados)
   - [Power BI em tempo real](#power-bi-em-tempo-real)
   - [Pipeline de leituras](#pipeline-de-leituras)
@@ -85,11 +86,11 @@ KRF-Reader/
 │   └── sqlserver/                     # NNNN_nome.sql: migrações SQL Server (sequência própria)
 ├── docs/screenshots/                  # telas usadas neste README
 ├── src/
-│   ├── KrfReader.Domain/              # InventoryRules, TagRegistration, Epc, TagRead, TagState, InventoryEvent, DbLiterals
+│   ├── KrfReader.Domain/              # InventoryRules, TagRegistration, Package, Epc, TagRead, TagState, InventoryEvent, DbLiterals
 │   ├── KrfReader.Application/
 │   │   ├── Configuration/             # ReaderOptions (+ Inventory), PipelineOptions, PassageOptions, DatabaseOptions
-│   │   ├── Persistence/               # IInventoryRepository, ITagCatalogRepository
-│   │   ├── Pipeline/                  # InventoryPipeline, Deduplicator, ReadFilter, ModeState, PassageTracker, PassageMonitor
+│   │   ├── Persistence/               # IInventoryRepository, ITagCatalogRepository, IPackageCatalogRepository
+│   │   ├── Pipeline/                  # InventoryPipeline, Deduplicator, ReadFilter, ModeState, PassageTracker, PassageMonitor, PackageDirectory
 │   │   └── Readers/                   # IRfidReader, IReaderProtocol, IRfidReaderFactory, InventoryTuning (Gen2), RadioSetup (portas, Anatel)
 │   ├── KrfReader.Infrastructure/
 │   │   ├── Persistence/               # Sqlite/SqlServerInventoryRepository, BatchPlanner, migradores
@@ -104,6 +105,7 @@ KRF-Reader/
 | [Domain/InventoryRules.cs](src/KrfReader.Domain/InventoryRules.cs) | Decide o novo status e o evento a partir do status atual e do modo. Função pura. |
 | [Domain/Epc.cs](src/KrfReader.Domain/Epc.cs) | Normaliza e valida o EPC. |
 | [Domain/TagRegistration.cs](src/KrfReader.Domain/TagRegistration.cs) | Cadastro de tag e validação (EPC Gen2, descrição obrigatória). |
+| [Domain/Package.cs](src/KrfReader.Domain/Package.cs) | Embalagem com várias etiquetas e validação (código, tipo, medidas, peso, 1–8 EPCs). |
 | [Pipeline/InventoryPipeline.cs](src/KrfReader.Application/Pipeline/InventoryPipeline.cs) | Channels de entrada e persistência, workers particionados por EPC, lote, barreira de PARAR e shutdown. |
 | [Pipeline/ModeState.cs](src/KrfReader.Application/Pipeline/ModeState.cs) | Modo atual e geração; carimba cada leitura na chegada. |
 | [Pipeline/Deduplicator.cs](src/KrfReader.Application/Pipeline/Deduplicator.cs) | Ignora a mesma tag na mesma geração dentro de `DedupWindowSeconds`. |
@@ -118,9 +120,10 @@ KRF-Reader/
 | [Fakes/MockReader.cs](tests/KrfReader.Tests/Fakes/MockReader.cs) | Simulador usado só nos testes: população de tags, entrada e saída do campo, rajadas e leituras fantasma. |
 | [Persistence/SqliteInventoryRepository.cs](src/KrfReader.Infrastructure/Persistence/SqliteInventoryRepository.cs) | Aplica o lote numa transação: carrega estado, decide, faz upsert e insere eventos. |
 | [Persistence/SqliteInventoryRepository.Catalog.cs](src/KrfReader.Infrastructure/Persistence/SqliteInventoryRepository.Catalog.cs) | CRUD de `TagCadastro` e consulta de tags cadastradas com status e última detecção. |
+| [Persistence/SqliteInventoryRepository.Packages.cs](src/KrfReader.Infrastructure/Persistence/SqliteInventoryRepository.Packages.cs) | CRUD de embalagens e etiquetas, conflitos de EPC/código, herança de estado ao vincular. |
 | [Persistence/SqliteInventoryRepository.Movements.cs](src/KrfReader.Infrastructure/Persistence/SqliteInventoryRepository.Movements.cs) | Consulta de movimentações com filtros e gravação de passagens. |
 | [Persistence/SchemaMigrator.cs](src/KrfReader.Infrastructure/Persistence/SchemaMigrator.cs) | Migrações por `PRAGMA user_version`, uma transação por migração. |
-| [Persistence/BatchPlanner.cs](src/KrfReader.Infrastructure/Persistence/BatchPlanner.cs) | Decisão do lote independente de banco: estado atual → `InventoryRules.Decide` → linhas de upsert e de evento. |
+| [Persistence/BatchPlanner.cs](src/KrfReader.Infrastructure/Persistence/BatchPlanner.cs) | Decisão do lote independente de banco: estado do item (embalagem ou EPC avulso) → `InventoryRules.Decide` → linhas de upsert, evento e embalagem. |
 | [Persistence/SqlServerInventoryRepository.cs](src/KrfReader.Infrastructure/Persistence/SqlServerInventoryRepository.cs) | Mesmo contrato sobre SQL Server: cria o banco, liga `READ_COMMITTED_SNAPSHOT`, aplica migrações, grava o lote. |
 | [Persistence/SqlServerSchemaMigrator.cs](src/KrfReader.Infrastructure/Persistence/SqlServerSchemaMigrator.cs) | Migrações SQL Server versionadas em `dbo.SchemaVersao`, com `sp_getapplock` e lotes separados por `GO`. |
 | [UI/CompositionRoot.cs](src/KrfReader.UI/CompositionRoot.cs) | Monta configuração, factories, repositório e pipeline. |
@@ -145,6 +148,9 @@ KRF-Reader/
   <img src="docs/screenshots/cadastro.png" width="820" alt="KRF Reader: aba Cadastro" />
   <br/><sub>Cadastro de tags com status atual e última detecção</sub>
   <br/><br/>
+  <img src="docs/screenshots/embalagens.png" width="820" alt="KRF Reader: aba Embalagens" />
+  <br/><sub>Embalagens (GLT) com duas etiquetas, tipo, medidas, status e etiqueta da última detecção</sub>
+  <br/><br/>
   <img src="docs/screenshots/configuracao.png" width="820" alt="KRF Reader: aba Configuração" />
   <br/><sub>Configuração do leitor e do filtro de leituras</sub>
   <br/><br/>
@@ -157,7 +163,7 @@ KRF-Reader/
 
 <br/>
 
-**OPERAÇÃO.** Botões ENTRADA, SAÍDA e PARAR. Mostra o modo ativo, o status do leitor, os contadores (tags dentro, tags fora, lidas nesta sessão), o painel **PASSAGEM** (veredito, tags, rodadas estáveis, estimativa de não lidas, tabela de tags com as marginais no topo, Q/session/target em uso) e as últimas 200 leituras gravadas no estoque. Detalhes em [Leitura de muitas tags](#leitura-de-muitas-tags-passagem).
+**OPERAÇÃO.** Botões ENTRADA, SAÍDA e PARAR. Mostra o modo ativo, o status do leitor, os contadores (itens dentro, itens fora, lidas nesta sessão; embalagem conta uma vez), o painel **PASSAGEM** (veredito, itens, rodadas estáveis, estimativa de não lidas, tabela de tags com as marginais no topo, Q/session/target em uso) e as últimas 200 leituras gravadas no estoque. Detalhes em [Leitura de muitas tags](#leitura-de-muitas-tags-passagem).
 
 **CONSULTA.** Busca por trecho de EPC, descrição ou SKU. Mostra descrição do cadastro, status atual, última leitura e última mudança de cada tag.
 
@@ -168,6 +174,10 @@ antena, RSSI e a passagem que a contém. Totais de entradas, saídas e anomalias
 **CADASTRO.** Cadastra tags com descrição, SKU, categoria, unidade, localização e observação, digitando o EPC ou lendo a
 tag no leitor. A lista mostra status atual (DENTRO, FORA, NUNCA LIDA) e última detecção com antena e RSSI. Detalhes em
 [Cadastro de tags](#cadastro-de-tags).
+
+**EMBALAGENS.** Cadastra embalagens retornáveis (GLT, KLT, caixa) com código, tipo, descrição, medidas, peso e de 1 a 8
+etiquetas, digitando o EPC ou lendo as etiquetas no leitor. A lista mostra status, última detecção e qual etiqueta foi
+lida por último. Detalhes em [Embalagens com várias etiquetas](#embalagens-com-várias-etiquetas).
 
 **CONFIGURAÇÃO.** Quatro partes:
 
@@ -209,7 +219,35 @@ Tabela `TagCadastro`, separada de `Tags`.
 - EPC já cadastrado abre em edição. Remover o cadastro **não** apaga status nem histórico da tag.
 - Na **Consulta**, cada tag mostra a descrição (ou "não cadastrada"), a busca casa EPC, descrição ou SKU, e "Cadastro desta tag" abre a tag selecionada na aba Cadastro.
 
+EPC que é etiqueta de embalagem não entra aqui (o cadastro recusa e aponta a embalagem).
+
 **O cadastro não altera a regra de estoque.** Tag cadastrada e nunca lida em ENTRADA, quando lida em SAÍDA, continua sendo `SAIDA_SEM_ENTRADA`; tag não cadastrada lida em ENTRADA continua sendo criada como DENTRO. Ver [Decisões e Desafios](#decisões-e-desafios).
+
+### Embalagens com várias etiquetas
+
+Para embalagem com partes metálicas ou carregando peças de metal (GLT com tags on-metal em faces opostas). Uma face
+encostada em metal ou virada para longe da antena pode não responder; a outra cobre. Aba **Embalagens**, tabelas
+`Embalagens` e `EmbalagemEtiquetas`.
+
+- **Item = embalagem.** Ler **qualquer** etiqueta detecta a embalagem. A regra de [Regras de negócio](#regras-de-negócio)
+  roda sobre o status da embalagem, não do EPC: a segunda etiqueta da mesma caixa no mesmo modo é releitura. Uma
+  passagem gera **uma** movimentação por embalagem, com o EPC da primeira etiqueta lida e o `EmbalagemId`.
+- **Status e última detecção ficam na embalagem**, com a etiqueta, a antena e o RSSI da última leitura. Etiqueta que
+  nunca aparece como "última" é face blindada ou tag com defeito. As linhas de `Tags` das etiquetas acompanham o status
+  da embalagem, inclusive a que não foi lida no lote.
+- **Código x tipo.** `Codigo` identifica a embalagem física (único, maiúsculas). `TipoGlt` (ex.: `GLT1165`) é o modelo e
+  se repete, inclusive com medidas diferentes: não é chave.
+- **Um EPC, um significado.** Etiqueta pertence a no máximo uma embalagem e não pode estar também no cadastro de tag
+  avulsa. O cadastro recusa e diz onde o EPC está.
+- **Caixa já lida antes do cadastro.** Ao vincular etiquetas a uma embalagem sem estado, ela herda o status da etiqueta
+  que mudou de status por último. A caixa que entrou como tags soltas continua DENTRO e a próxima SAÍDA é
+  `MUDANCA_STATUS`, não `SAIDA_SEM_ENTRADA`.
+- **Passagem conta itens.** Convergência e estimador de não lidas usam a embalagem como unidade: a segunda face de uma
+  caixa já vista não é item novo, e a face que nunca respondeu não é item perdido. O painel mostra também quantas
+  embalagens tiveram etiqueta não lida (informativo, não muda o veredito).
+- **Tag avulsa não muda**: EPC sem embalagem continua sendo 1 EPC = 1 item.
+- **Remover embalagem** apaga o cadastro e os vínculos; as etiquetas voltam a ser tags avulsas e o histórico continua
+  em `Eventos` com o `EmbalagemId` antigo.
 
 ### Banco de dados
 
@@ -222,9 +260,13 @@ tabelas, views e regras nos dois. Datas em UTC: no SQLite como texto `yyyy-MM-dd
 | `TagCadastro` | tabela | EPC, descrição, SKU, categoria, unidade, localização, observação, cadastrado em, atualizado em |
 | `Tags` | tabela | Estado de toda tag já lida: status, última detecção (`UltimaLeitura`) com antena e RSSI, última mudança de status |
 | `Eventos` | tabela | Movimentações: EPC, modo, tipo (`CRIACAO`, `MUDANCA_STATUS`, `SAIDA_SEM_ENTRADA`), data/hora, antena, RSSI |
-| `Passagens` | tabela | Passagens fechadas do módulo de alta densidade: modo, início, fim, tags, leituras, rodadas, veredito |
-| `TagsCadastradas` | view | `TagCadastro` + status + última detecção. Tag nunca lida vem com status nulo |
-| `Movimentacoes` | view | `Eventos` + item do cadastro + id da passagem + flag `Anomalia` (saída sem entrada) |
+| `Passagens` | tabela | Passagens fechadas do módulo de alta densidade: modo, início, fim, tags, itens, embalagens, leituras, rodadas, veredito |
+| `Embalagens` | tabela | Embalagem física: código (único), tipo, descrição, medidas, peso + status, última detecção, etiqueta/antena/RSSI da última leitura |
+| `EmbalagemEtiquetas` | tabela | EPC → embalagem, com posição (face). EPC é chave: uma etiqueta, uma embalagem |
+| `TagsCadastradas` | view | Tags avulsas + etiquetas de embalagem, com status e última detecção. Etiqueta traz `EmbalagemId`/`EmbalagemCodigo` e o status da embalagem. Nunca lida vem com status nulo |
+| `Movimentacoes` | view | `Eventos` + item (embalagem ou cadastro) + id da passagem + flag `Anomalia` + `EmbalagemId`, `EmbalagemCodigo`, `TipoGlt` |
+| `EmbalagensCadastradas` | view | Uma linha por embalagem: cadastro, estado e número de etiquetas |
+| `ItensEstoque` | view | Uma linha por item de estoque: embalagem com estado + tag lida que não é etiqueta. Base dos contadores DENTRO/FORA |
 
 - **Mesma transação.** Cada lote grava os eventos e atualiza status, última detecção, antena e RSSI em `Tags` numa
   única transação. A última detecção nunca retrocede: lote atrasado com leitura antiga não sobrescreve.
@@ -232,17 +274,19 @@ tabelas, views e regras nos dois. Datas em UTC: no SQLite como texto `yyyy-MM-dd
 - **Passagem.** A movimentação é ligada à passagem pelo modo e pela janela de tempo (`Movimentacoes.PassagemId`). O id
   é o do banco; o número mostrado ao vivo na aba Operação reinicia a cada execução e não é o mesmo.
 - **Índices.** `Eventos (EpcId, Timestamp)`, `Eventos (Timestamp)`, `Eventos (Modo, Timestamp)`, `Eventos (Tipo)`,
-  `Tags (Status)`, `Tags (UltimaLeitura)`, `TagCadastro (Sku)`, `Passagens (Modo, InicioUtc)`.
+  `Tags (Status)`, `Tags (UltimaLeitura)`, `TagCadastro (Sku)`, `Passagens (Modo, InicioUtc)`,
+  `EmbalagemEtiquetas (EmbalagemId)`, `Embalagens (Status)`, `Embalagens (TipoGlt)`, `Eventos (EmbalagemId, Timestamp)`.
 
 **Migrações.** Arquivos `db/migrations/NNNN_nome.sql`, embutidos no assembly e aplicados no start por
 [SchemaMigrator](src/KrfReader.Infrastructure/Persistence/SchemaMigrator.cs). A versão do banco fica em
 `PRAGMA user_version`. Cada migração roda uma vez, em transação `IMMEDIATE`, junto com a nova versão: falha no meio
 desfaz tudo e o banco continua na versão anterior. Banco da v0.4 (versão 0) recebe a `0001` como no-op e a `0002`
 adiciona colunas, tabela e views sem perder dados; antena e RSSI da última detecção são preenchidos a partir do último
-evento quando ele coincide com `UltimaLeitura`. Banco com versão maior que a do executável é recusado.
+evento quando ele coincide com `UltimaLeitura`. A `0003` cria embalagens e recria as views (colunas antigas na mesma
+ordem, novas no fim). Banco com versão maior que a do executável é recusado.
 
 No SQL Server a sequência é própria (`db/migrations/sqlserver/`, [SqlServerSchemaMigrator](src/KrfReader.Infrastructure/Persistence/SqlServerSchemaMigrator.cs)):
-a `0001` cria de uma vez o schema equivalente ao SQLite v2. A versão fica em `dbo.SchemaVersao`; cada migração roda numa
+a `0001` cria de uma vez o schema equivalente ao SQLite v2 e a `0002` equivale à `0003` do SQLite (embalagens). A versão fica em `dbo.SchemaVersao`; cada migração roda numa
 transação com `sp_getapplock`, então duas instâncias abrindo juntas não migram em paralelo. Mudança de schema exige
 arquivo novo nas duas pastas.
 
@@ -265,15 +309,17 @@ para dezenas de milhões de movimentações).
    **Testar conexão**, **Salvar banco**, fechar e abrir o app. Na abertura ele cria o banco `KrfReader`, liga
    `READ_COMMITTED_SNAPSHOT` e aplica as migrações.
 3. **Conectar o Power BI Desktop.** *Obter dados* → *SQL Server* → Servidor `localhost\SQLEXPRESS`, Banco `KrfReader`,
-   modo **DirectQuery** → credencial *Windows* → marcar `Movimentacoes`, `TagsCadastradas`, `Passagens` (e `Tags`, se
-   quiser também tag lida sem cadastro).
+   modo **DirectQuery** → credencial *Windows* → marcar `Movimentacoes`, `ItensEstoque`, `EmbalagensCadastradas`,
+   `TagsCadastradas`, `Passagens` (e `Tags`, se quiser também tag lida sem cadastro).
 4. **Atualização automática.** No relatório: *Formatar página* → *Atualização de página* → ligar e definir o intervalo
    (ex.: 5 s). Sem isso o DirectQuery só consulta ao abrir, filtrar ou clicar em *Atualizar*.
 
 | Objeto | Uso no BI |
 |---|---|
-| `Movimentacoes` | Fato: uma linha por movimentação. `DataHora` (UTC), `DataHoraLocal` (Brasília), `Tipo` (ENTRADA/SAIDA), `Evento`, `Anomalia` (bit), `PassagemId` |
-| `TagsCadastradas` | Dimensão de item com status atual: `Status` (DENTRO/FORA/nulo), `UltimaDeteccao`, `UltimaDeteccaoLocal` |
+| `Movimentacoes` | Fato: uma linha por movimentação (embalagem conta uma vez). `DataHora` (UTC), `DataHoraLocal` (Brasília), `Tipo` (ENTRADA/SAIDA), `Evento`, `Anomalia` (bit), `PassagemId`, `EmbalagemId`, `EmbalagemCodigo`, `TipoGlt` |
+| `ItensEstoque` | Estoque atual por item: `TipoItem` (EMBALAGEM/TAG), `Item`, `Status`, `UltimaDeteccao` |
+| `EmbalagensCadastradas` | Dimensão de embalagem: código, tipo, medidas, peso, status, última detecção, etiquetas |
+| `TagsCadastradas` | Dimensão de EPC com status atual: `Status` (DENTRO/FORA/nulo), `UltimaDeteccao`, `UltimaDeteccaoLocal`, `EmbalagemCodigo` |
 | `Passagens` | Qualidade de leitura: veredito, tags, leituras, rodadas por passagem |
 | `Tags` | Estado de toda tag lida, cadastrada ou não |
 
@@ -283,7 +329,8 @@ para dezenas de milhões de movimentações).
 <br/>
 
 ```DAX
-Estoque atual   = CALCULATE(COUNTROWS(TagsCadastradas), TagsCadastradas[Status] = "DENTRO")
+Estoque atual   = CALCULATE(COUNTROWS(ItensEstoque), ItensEstoque[Status] = "DENTRO")
+GLT dentro      = CALCULATE(COUNTROWS(EmbalagensCadastradas), EmbalagensCadastradas[Status] = "DENTRO")
 Entradas hoje   = CALCULATE(COUNTROWS(Movimentacoes), Movimentacoes[Tipo] = "ENTRADA",
                     Movimentacoes[DataHoraLocal] >= TODAY())
 Saídas hoje     = CALCULATE(COUNTROWS(Movimentacoes), Movimentacoes[Tipo] = "SAIDA",
@@ -291,7 +338,9 @@ Saídas hoje     = CALCULATE(COUNTROWS(Movimentacoes), Movimentacoes[Tipo] = "SA
 Anomalias       = CALCULATE(COUNTROWS(Movimentacoes), Movimentacoes[Anomalia] = TRUE())
 ```
 
-Relacionamento: `Movimentacoes[EpcId]` → `TagsCadastradas[EpcId]` (muitos para um).
+Relacionamentos: `Movimentacoes[EpcId]` → `TagsCadastradas[EpcId]` e `Movimentacoes[EmbalagemId]` →
+`EmbalagensCadastradas[EmbalagemId]` (muitos para um). Contar estoque por `TagsCadastradas` conta EPC: uma GLT com duas
+etiquetas apareceria duas vezes. Use `ItensEstoque` ou `EmbalagensCadastradas`.
 
 </details>
 
@@ -500,7 +549,7 @@ repositório só carrega o estado dos EPCs e grava o plano numa transação.
 ```bash
 git clone https://github.com/GZimbra/KRF-Reader.git && cd KRF-Reader
 dotnet run  --project src/KrfReader.UI        # conecta no R200 (COM3)
-dotnet test KrfReader.sln                     # 359 casos; os 39 de SQL Server pulam sem KRF_TEST_SQLSERVER
+dotnet test KrfReader.sln                     # 403 casos; os 53 de SQL Server pulam sem KRF_TEST_SQLSERVER
 dotnet publish src/KrfReader.UI -c Release -r win-x64   --self-contained -p:PublishSingleFile=true -o publish/win-x64
 dotnet publish src/KrfReader.UI -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true -o publish/linux-x64
 ```
@@ -681,6 +730,21 @@ histórico de movimentações. Copiar status para `TagCadastro` ou eventos para 
 que divergem no primeiro erro. As views `TagsCadastradas` e `Movimentacoes` entregam "uma linha por item" e "uma linha
 por movimentação" sem duplicar dado. Anomalia continua sendo tipo de evento (`SAIDA_SEM_ENTRADA`), não status: um status
 ANOMALIA exigiria regra para a leitura seguinte da tag e mudaria `InventoryRules.Decide`.
+
+</details>
+
+<details>
+<summary><b>Embalagem como item, não grupo de tags</b></summary>
+
+<br/>
+
+A alternativa mais barata seria manter o estado por EPC e só agrupar na exibição. Não serve: com duas etiquetas por GLT,
+a face que passou longe da antena ficaria DENTRO depois da saída, o contador de estoque dobraria e cada passagem geraria
+duas movimentações. O estado foi para a embalagem (`Embalagens`), e o lote decide pela chave do item (embalagem ou EPC
+avulso) dentro da mesma transação de sempre; `InventoryRules` não mudou. Custo: `Tags` passa a ter linhas de etiqueta
+cujo status é cópia do da embalagem (mantidas alinhadas pelo próprio lote), e o mesmo EPC não pode ser ao mesmo tempo
+etiqueta e tag avulsa. O código da embalagem é a chave; o tipo (GLT1165) se repete com medidas diferentes na tabela de
+tipos e por isso não identifica nada.
 
 </details>
 

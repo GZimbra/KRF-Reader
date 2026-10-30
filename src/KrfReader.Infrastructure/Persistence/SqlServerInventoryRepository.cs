@@ -18,7 +18,7 @@ namespace KrfReader.Infrastructure.Persistence;
 /// liga READ_COMMITTED_SNAPSHOT (consulta do BI não bloqueia gravação do lote e vice-versa) e aplica as migrações.
 /// </para>
 /// </summary>
-public sealed partial class SqlServerInventoryRepository : IInventoryRepository, ITagCatalogRepository
+public sealed partial class SqlServerInventoryRepository : IInventoryRepository, ITagCatalogRepository, IPackageCatalogRepository
 {
     /// <summary>Limite de parâmetros por SELECT ... IN (...). O SQL Server aceita até 2100 por comando.</summary>
     internal const int InClauseChunkSize = 500;
@@ -42,8 +42,32 @@ public sealed partial class SqlServerInventoryRepository : IInventoryRepository,
         """;
 
     private const string InsertEventSql = """
-        INSERT INTO dbo.Eventos (EpcId, Modo, Tipo, [Timestamp], AntenaId, Rssi)
-        VALUES (@EpcId, @Modo, @Tipo, @Timestamp, @AntenaId, @Rssi)
+        INSERT INTO dbo.Eventos (EpcId, Modo, Tipo, [Timestamp], AntenaId, Rssi, EmbalagemId)
+        VALUES (@EpcId, @Modo, @Tipo, @Timestamp, @AntenaId, @Rssi, @EmbalagemId)
+        """;
+
+    private const string SelectPackagesSql = """
+        SELECT ee.EpcId, em.Id, em.Codigo, em.Status,
+               (SELECT COUNT(*) FROM dbo.EmbalagemEtiquetas x WHERE x.EmbalagemId = em.Id) AS Etiquetas
+        FROM dbo.EmbalagemEtiquetas ee
+        JOIN dbo.Embalagens em ON em.Id = ee.EmbalagemId
+        WHERE ee.EpcId IN @Epcs
+        """;
+
+    // Mesma semântica do SQLite (SqliteInventoryRepository.UpdatePackageSql).
+    private const string UpdatePackageSql = """
+        UPDATE dbo.Embalagens SET
+            UltimaEpcId = CASE WHEN UltimaDeteccao IS NULL OR @UltimaDeteccao >= UltimaDeteccao THEN @UltimaEpcId ELSE UltimaEpcId END,
+            UltimaAntenaId = CASE WHEN UltimaDeteccao IS NULL OR @UltimaDeteccao >= UltimaDeteccao THEN @UltimaAntenaId ELSE UltimaAntenaId END,
+            UltimaRssi = CASE WHEN UltimaDeteccao IS NULL OR @UltimaDeteccao >= UltimaDeteccao THEN @UltimaRssi ELSE UltimaRssi END,
+            UltimaDeteccao = CASE WHEN UltimaDeteccao IS NULL OR @UltimaDeteccao > UltimaDeteccao THEN @UltimaDeteccao ELSE UltimaDeteccao END,
+            Status = CASE WHEN @StatusChanged = 1 THEN @Status ELSE Status END,
+            UltimaAtualizacaoStatus = CASE WHEN @StatusChanged = 1 THEN @UltimaAtualizacaoStatus ELSE UltimaAtualizacaoStatus END
+        WHERE Id = @Id;
+        IF @StatusChanged = 1
+            UPDATE dbo.Tags SET Status = @Status, UltimaAtualizacaoStatus = @UltimaAtualizacaoStatus
+            WHERE Status <> @Status
+              AND EpcId IN (SELECT EpcId FROM dbo.EmbalagemEtiquetas WHERE EmbalagemId = @Id);
         """;
 
     private readonly string _connectionString;
@@ -100,7 +124,8 @@ public sealed partial class SqlServerInventoryRepository : IInventoryRepository,
         try
         {
             var state = await LoadStatusAsync(connection, transaction, epcs, cancellationToken).ConfigureAwait(false);
-            var plan = BatchPlanner.Build(mode, reads, epcs, state);
+            var packages = await LoadPackagesAsync(connection, transaction, epcs, cancellationToken).ConfigureAwait(false);
+            var plan = BatchPlanner.Build(mode, reads, epcs, state, packages);
 
             var upserts = plan.Upserts.Select(u => new TagUpsertRow
             {
@@ -120,12 +145,26 @@ public sealed partial class SqlServerInventoryRepository : IInventoryRepository,
                 Timestamp = new SqlDateTime2(e.Timestamp),
                 AntenaId = e.AntenaId,
                 Rssi = e.Rssi,
+                EmbalagemId = e.EmbalagemId,
+            }).ToList();
+            var packageUpdates = plan.PackageUpdates.Select(u => new PackageUpdateRow
+            {
+                Id = u.Id,
+                Status = u.Status.ToDb(),
+                StatusChanged = u.StatusChanged ? 1 : 0,
+                UltimaAtualizacaoStatus = new SqlDateTime2(u.UltimaAtualizacaoStatus),
+                UltimaDeteccao = new SqlDateTime2(u.UltimaDeteccao),
+                UltimaEpcId = u.UltimaEpcId,
+                UltimaAntenaId = u.UltimaAntenaId,
+                UltimaRssi = u.UltimaRssi,
             }).ToList();
 
             // Tags antes de Eventos por causa da FK.
             await connection.ExecuteAsync(new CommandDefinition(UpsertTagSql, upserts, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
             if (events.Count > 0)
                 await connection.ExecuteAsync(new CommandDefinition(InsertEventSql, events, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
+            if (packageUpdates.Count > 0)
+                await connection.ExecuteAsync(new CommandDefinition(UpdatePackageSql, packageUpdates, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
 
             await transaction.CommitAsync(cancellationToken).ConfigureAwait(false);
 
@@ -153,8 +192,8 @@ public sealed partial class SqlServerInventoryRepository : IInventoryRepository,
     {
         const string sql = """
             SELECT
-                (SELECT COUNT(*) FROM dbo.Tags WHERE Status = @Dentro) AS Dentro,
-                (SELECT COUNT(*) FROM dbo.Tags WHERE Status = @Fora) AS Fora,
+                (SELECT COUNT(*) FROM dbo.ItensEstoque WHERE Status = @Dentro) AS Dentro,
+                (SELECT COUNT(*) FROM dbo.ItensEstoque WHERE Status = @Fora) AS Fora,
                 (SELECT COUNT(*) FROM dbo.Eventos WHERE Tipo = @Anomalia) AS Anomalias
             """;
 
@@ -177,14 +216,18 @@ public sealed partial class SqlServerInventoryRepository : IInventoryRepository,
         var term = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
         const string sql = """
             SELECT TOP (@Limit) t.EpcId, t.Status, t.UltimaLeitura, t.UltimaAtualizacaoStatus, t.UltimaAntenaId, t.UltimaRssi,
-                   c.Descricao, c.Sku
+                   COALESCE(em.Descricao, em.Codigo, c.Descricao) AS Descricao, c.Sku, em.Codigo AS EmbalagemCodigo
             FROM dbo.Tags t
             LEFT JOIN dbo.TagCadastro c ON c.EpcId = t.EpcId
+            LEFT JOIN dbo.EmbalagemEtiquetas ee ON ee.EpcId = t.EpcId
+            LEFT JOIN dbo.Embalagens em ON em.Id = ee.EmbalagemId
             WHERE (@Status IS NULL OR t.Status = @Status)
               AND (@Pattern IS NULL
                    OR t.EpcId LIKE @Pattern ESCAPE '\'
                    OR c.Descricao LIKE @Pattern ESCAPE '\'
-                   OR c.Sku LIKE @Pattern ESCAPE '\')
+                   OR c.Sku LIKE @Pattern ESCAPE '\'
+                   OR em.Codigo LIKE @Pattern ESCAPE '\'
+                   OR em.Descricao LIKE @Pattern ESCAPE '\')
             ORDER BY t.UltimaLeitura DESC
             """;
 
@@ -204,7 +247,8 @@ public sealed partial class SqlServerInventoryRepository : IInventoryRepository,
             r.Descricao,
             r.Sku,
             r.UltimaAntenaId,
-            r.UltimaRssi)).ToList();
+            r.UltimaRssi,
+            r.EmbalagemCodigo)).ToList();
     }
 
     public async Task<IReadOnlyList<InventoryEvent>> GetEventsAsync(string epc, int limit = 200, CancellationToken cancellationToken = default)
@@ -346,6 +390,30 @@ public sealed partial class SqlServerInventoryRepository : IInventoryRepository,
         return state;
     }
 
+    private static async Task<Dictionary<string, BatchPlanner.PackageState>> LoadPackagesAsync(
+        SqlConnection connection, SqlTransaction transaction, string[] epcs, CancellationToken cancellationToken)
+    {
+        var result = new Dictionary<string, BatchPlanner.PackageState>(StringComparer.Ordinal);
+        var byId = new Dictionary<long, BatchPlanner.PackageState>();
+        foreach (var chunk in epcs.Distinct(StringComparer.Ordinal).Chunk(InClauseChunkSize))
+        {
+            var rows = await connection.QueryAsync<PackageLinkRow>(new CommandDefinition(
+                SelectPackagesSql, new { Epcs = chunk }, transaction, cancellationToken: cancellationToken)).ConfigureAwait(false);
+            foreach (var row in rows)
+            {
+                if (!byId.TryGetValue(row.Id, out var package))
+                {
+                    package = new BatchPlanner.PackageState(
+                        new PackageRef(row.Id, row.Codigo, row.Etiquetas),
+                        row.Status is null ? null : DbLiterals.ParseStatus(row.Status));
+                    byId[row.Id] = package;
+                }
+                result[row.EpcId] = package;
+            }
+        }
+        return result;
+    }
+
     /// <summary>Como no SQLite, mais <c>[</c>: no LIKE do SQL Server <c>[...]</c> é classe de caracteres.</summary>
     internal static string EscapeLike(string term) =>
         SqliteInventoryRepository.EscapeLike(term).Replace("[", @"\[", StringComparison.Ordinal);
@@ -354,6 +422,27 @@ public sealed partial class SqlServerInventoryRepository : IInventoryRepository,
     {
         public string EpcId { get; init; } = "";
         public string Status { get; init; } = "";
+    }
+
+    private sealed record PackageLinkRow
+    {
+        public string EpcId { get; init; } = "";
+        public long Id { get; init; }
+        public string Codigo { get; init; } = "";
+        public string? Status { get; init; }
+        public int Etiquetas { get; init; }
+    }
+
+    private sealed record PackageUpdateRow
+    {
+        public long Id { get; init; }
+        public string Status { get; init; } = "";
+        public int StatusChanged { get; init; }
+        public SqlDateTime2 UltimaAtualizacaoStatus { get; init; } = null!;
+        public SqlDateTime2 UltimaDeteccao { get; init; } = null!;
+        public string UltimaEpcId { get; init; } = "";
+        public int UltimaAntenaId { get; init; }
+        public double UltimaRssi { get; init; }
     }
 
     private sealed record TagRow
@@ -366,6 +455,7 @@ public sealed partial class SqlServerInventoryRepository : IInventoryRepository,
         public double? UltimaRssi { get; init; }
         public string? Descricao { get; init; }
         public string? Sku { get; init; }
+        public string? EmbalagemCodigo { get; init; }
     }
 
     private sealed record TagUpsertRow
@@ -387,6 +477,7 @@ public sealed partial class SqlServerInventoryRepository : IInventoryRepository,
         public SqlDateTime2 Timestamp { get; init; } = null!;
         public int AntenaId { get; init; }
         public double Rssi { get; init; }
+        public long? EmbalagemId { get; init; }
     }
 
     private sealed record EventRow

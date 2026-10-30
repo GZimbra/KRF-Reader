@@ -41,12 +41,12 @@ public sealed partial class SqliteInventoryRepository
         }
         if (!string.IsNullOrWhiteSpace(filter.Search))
         {
-            where.Add(@"(EpcId LIKE @Pattern ESCAPE '\' OR Descricao LIKE @Pattern ESCAPE '\' OR Sku LIKE @Pattern ESCAPE '\')");
+            where.Add(@"(EpcId LIKE @Pattern ESCAPE '\' OR Descricao LIKE @Pattern ESCAPE '\' OR Sku LIKE @Pattern ESCAPE '\' OR EmbalagemCodigo LIKE @Pattern ESCAPE '\')");
             parameters.Add("Pattern", "%" + EscapeLike(filter.Search.Trim()) + "%");
         }
         parameters.Add("Limit", filter.Limit);
 
-        var sql = new StringBuilder("SELECT Id, EpcId, Descricao, Sku, Tipo, Evento, DataHora, AntenaId, Rssi, PassagemId FROM Movimentacoes");
+        var sql = new StringBuilder("SELECT Id, EpcId, Descricao, Sku, Tipo, Evento, DataHora, AntenaId, Rssi, PassagemId, EmbalagemId, EmbalagemCodigo, TipoGlt FROM Movimentacoes");
         if (where.Count > 0)
             sql.Append(" WHERE ").AppendJoin(" AND ", where);
         sql.Append(" ORDER BY DataHora DESC, Id DESC LIMIT @Limit");
@@ -65,7 +65,10 @@ public sealed partial class SqliteInventoryRepository
             DbTimestamp.FromDb(r.DataHora),
             checked((int)r.AntenaId),
             r.Rssi,
-            r.PassagemId)).ToList();
+            r.PassagemId,
+            r.EmbalagemId,
+            r.EmbalagemCodigo,
+            r.TipoGlt)).ToList();
     }
 
     public async Task<long?> SavePassageAsync(PassageSnapshot passage, CancellationToken cancellationToken = default)
@@ -81,8 +84,8 @@ public sealed partial class SqliteInventoryRepository
 
         const string sql = """
             INSERT INTO Passagens (Modo, InicioUtc, FimUtc, Tags, Leituras, Rodadas, EstimativaPerdidas,
-                                   Veredito, MotivoFechamento, Problemas)
-            VALUES (@Modo, @Inicio, @Fim, @Tags, @Leituras, @Rodadas, @Estimativa, @Veredito, @Motivo, @Problemas);
+                                   Veredito, MotivoFechamento, Problemas, Itens, Embalagens)
+            VALUES (@Modo, @Inicio, @Fim, @Tags, @Leituras, @Rodadas, @Estimativa, @Veredito, @Motivo, @Problemas, @Itens, @Embalagens);
             SELECT last_insert_rowid();
             """;
 
@@ -99,6 +102,8 @@ public sealed partial class SqliteInventoryRepository
             Veredito = VerdictToDb(passage.Verdict),
             Motivo = passage.CloseReason,
             Problemas = passage.Issues.Count == 0 ? null : string.Join(" | ", passage.Issues),
+            Itens = passage.DistinctItems,
+            Embalagens = passage.Packages,
         }, cancellationToken: cancellationToken)).ConfigureAwait(false);
 
         _logger.LogInformation("Passagem gravada: #{Id} {Mode} {Tags} tags, {Verdict}.", id, mode.ToDb(), passage.DistinctTags, passage.Verdict);
@@ -126,5 +131,8 @@ public sealed partial class SqliteInventoryRepository
         public long AntenaId { get; init; }
         public double Rssi { get; init; }
         public long? PassagemId { get; init; }
+        public long? EmbalagemId { get; init; }
+        public string? EmbalagemCodigo { get; init; }
+        public string? TipoGlt { get; init; }
     }
 }

@@ -323,21 +323,22 @@
                       <TextBlock Classes="verdictText" Text="{Binding VerdictText}" />
                     </StackPanel>
                   </Border>
-                  <Border Grid.Column="1" Classes="kpi" ToolTip.Tip="EPCs distintos lidos nesta passagem">
+                  <Border Grid.Column="1" Classes="kpi"
+                          ToolTip.Tip="Itens distintos nesta passagem: embalagem conta 1 (qualquer etiqueta lida) + tags avulsas. Etiquetas lidas: ver detalhe abaixo.">
                     <StackPanel>
-                      <TextBlock Classes="label" Text="TAGS" />
+                      <TextBlock Classes="label" Text="ITENS" />
                       <TextBlock Classes="readout" Text="{Binding PassageTagCount, StringFormat={}{0:N0}}" />
                     </StackPanel>
                   </Border>
                   <Border Grid.Column="2" Classes="kpi"
-                          ToolTip.Tip="Rodadas seguidas, com leitura, sem nenhum EPC novo. A passagem só é confiável quando atinge o mínimo.">
+                          ToolTip.Tip="Rodadas seguidas, com leitura, sem nenhum item novo. A passagem só é confiável quando atinge o mínimo.">
                     <StackPanel>
                       <TextBlock Classes="label" Text="ESTÁVEIS" />
                       <TextBlock Classes="readout" Text="{Binding PassageStableText}" />
                     </StackPanel>
                   </Border>
                   <Border Grid.Column="3" Classes="kpi"
-                          ToolTip.Tip="Tags provavelmente não lidas (estimador Chao2: tags vistas em 1 e em 2 rodadas)">
+                          ToolTip.Tip="Itens provavelmente não lidos (estimador Chao2: itens vistos em 1 e em 2 rodadas; embalagem conta pela soma das faces)">
                     <StackPanel>
                       <TextBlock Classes="label" Text="NÃO LIDAS EST." />
                       <TextBlock Classes="readout" Foreground="{StaticResource BrandSandBrush}" Text="{Binding PassageMissedText}" />
@@ -362,7 +363,7 @@
 
                 <Border Grid.Row="3" Classes="tableHeader">
                   <Grid ColumnDefinitions="*,60,70,150,100">
-                    <TextBlock Grid.Column="0" Classes="header" Text="EPC" />
+                    <TextBlock Grid.Column="0" Classes="header" Text="EMBALAGEM · EPC" />
                     <TextBlock Grid.Column="1" Classes="header" Text="LEIT." />
                     <TextBlock Grid.Column="2" Classes="header" Text="RODADAS" />
                     <TextBlock Grid.Column="3" Classes="header" Text="RSSI MÁX dBm" />
@@ -406,7 +407,7 @@
                 <Border Grid.Row="1" Classes="tableHeader">
                   <Grid ColumnDefinitions="100,*,52,130">
                     <TextBlock Grid.Column="0" Classes="header" Text="HORA" />
-                    <TextBlock Grid.Column="1" Classes="header" Text="EPC" />
+                    <TextBlock Grid.Column="1" Classes="header" Text="EMBALAGEM · EPC" />
                     <TextBlock Grid.Column="2" Classes="header" Text="RSSI" />
                     <TextBlock Grid.Column="3" Classes="header" Text="RESULTADO" />
                   </Grid>
@@ -417,7 +418,7 @@
                       <Border Classes="row" Classes.anomaly="{Binding IsAnomaly}">
                         <Grid ColumnDefinitions="100,*,52,130">
                           <TextBlock Grid.Column="0" Classes="dim" Text="{Binding Time}" />
-                          <TextBlock Grid.Column="1" Text="{Binding Epc}" TextTrimming="CharacterEllipsis" />
+                          <TextBlock Grid.Column="1" Text="{Binding Label}" TextTrimming="CharacterEllipsis" />
                           <TextBlock Grid.Column="2" Text="{Binding Rssi}" />
                           <TextBlock Grid.Column="3" Text="{Binding Result}" />
                         </Grid>
@@ -738,8 +739,185 @@
         </Grid>
       </TabItem>
 
+      <!-- ═══════════════════════ EMBALAGENS ═══════════════════════ -->
+      <TabItem Header="05 EMBALAGENS">
+        <Grid ColumnDefinitions="440,*" ColumnSpacing="10" DataContext="{Binding Embalagens}" x:DataType="vm:PackageCatalogViewModel">
+
+          <!-- Formulário -->
+          <ScrollViewer Grid.Column="0">
+            <c:HudBorder Classes="card" Padding="20">
+              <StackPanel Spacing="8">
+                <DockPanel Margin="0,0,0,6">
+                  <Button DockPanel.Dock="Right" Classes="ghost" Content="NOVA" Command="{Binding NewCommand}"
+                          ToolTip.Tip="Limpa o formulário para um novo cadastro" />
+                  <TextBlock Classes="sectionTitle" VerticalAlignment="Center" Text="{Binding FormTitle}" />
+                </DockPanel>
+
+                <Grid ColumnDefinitions="*,150" ColumnSpacing="8">
+                  <StackPanel Grid.Column="0" Spacing="4">
+                    <TextBlock Classes="label" Text="CÓDIGO *" />
+                    <TextBox Classes="mono" Text="{Binding Codigo}" MaxLength="64" Watermark="ex.: GLT-000123"
+                             ToolTip.Tip="Identificação da embalagem FÍSICA (patrimônio). Única." />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Spacing="4">
+                    <TextBlock Classes="label" Text="TIPO" />
+                    <TextBox Classes="mono" Text="{Binding TipoGlt}" MaxLength="32" Watermark="GLT1165"
+                             ToolTip.Tip="Modelo da embalagem. Repete entre embalagens (não é chave)." />
+                  </StackPanel>
+                </Grid>
+
+                <TextBlock Classes="label" Text="DESCRIÇÃO" Margin="0,6,0,0" />
+                <TextBox Text="{Binding Descricao}" MaxLength="200" Watermark="ex.: GLT peças estampadas · linha 3" />
+
+                <Grid ColumnDefinitions="*,*,*,*" ColumnSpacing="8" Margin="0,6,0,0">
+                  <StackPanel Grid.Column="0" Spacing="4">
+                    <TextBlock Classes="label" Text="COMPR. mm" />
+                    <TextBox Classes="mono" Text="{Binding ComprimentoMm}" MaxLength="6" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="1" Spacing="4">
+                    <TextBlock Classes="label" Text="LARG. mm" />
+                    <TextBox Classes="mono" Text="{Binding LarguraMm}" MaxLength="6" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="2" Spacing="4">
+                    <TextBlock Classes="label" Text="ALT. mm" />
+                    <TextBox Classes="mono" Text="{Binding AlturaMm}" MaxLength="6" />
+                  </StackPanel>
+                  <StackPanel Grid.Column="3" Spacing="4">
+                    <TextBlock Classes="label" Text="PESO kg" />
+                    <TextBox Classes="mono" Text="{Binding PesoKg}" MaxLength="10" Watermark="1,85" />
+                  </StackPanel>
+                </Grid>
+
+                <TextBlock Classes="label" Text="{Binding EtiquetasTitle}" Margin="0,10,0,0" />
+                <Border Classes="screen">
+                  <ItemsControl ItemsSource="{Binding Etiquetas}">
+                    <ItemsControl.ItemTemplate>
+                      <DataTemplate x:DataType="vm:PackageTagItem">
+                        <Grid ColumnDefinitions="*,80,Auto" Margin="10,3">
+                          <TextBlock Grid.Column="0" Classes="mono" VerticalAlignment="Center" Text="{Binding Epc}"
+                                     TextTrimming="CharacterEllipsis" />
+                          <TextBlock Grid.Column="1" Classes="mono dim" VerticalAlignment="Center" Text="{Binding PosicaoText}" />
+                          <Button Grid.Column="2" Classes="ghost" Content="✕" Padding="8,2"
+                                  Command="{Binding $parent[ItemsControl].((vm:PackageCatalogViewModel)DataContext).RemoveTagCommand}"
+                                  CommandParameter="{Binding}" ToolTip.Tip="Desvincular esta etiqueta" />
+                        </Grid>
+                      </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                  </ItemsControl>
+                </Border>
+                <Grid ColumnDefinitions="*,90,Auto" ColumnSpacing="6">
+                  <TextBox Grid.Column="0" Classes="mono" Text="{Binding NewEpc}" Watermark="EPC (ou LER ETIQUETAS)">
+                    <TextBox.KeyBindings>
+                      <KeyBinding Gesture="Enter" Command="{Binding AddTagCommand}" />
+                    </TextBox.KeyBindings>
+                  </TextBox>
+                  <TextBox Grid.Column="1" Text="{Binding NewPosicao}" MaxLength="32" Watermark="face" />
+                  <Button Grid.Column="2" Content="+" Command="{Binding AddTagCommand}" ToolTip.Tip="Adicionar EPC digitado" />
+                </Grid>
+                <Button Classes="accent" Content="LER ETIQUETAS" Command="{Binding CaptureCommand}" HorizontalAlignment="Left"
+                        ToolTip.Tip="Liga o leitor por 1,5 s. Uma tag no campo entra direto; mais de uma, você escolhe. Exige o modo PARADO; não altera o estoque." />
+                <TextBlock Classes="hint" FontSize="11" TextWrapping="Wrap"
+                           Text="Uma etiqueta por face (ex.: duas em faces opostas). Ler qualquer uma detecta a embalagem; a passagem gera uma movimentação só." />
+
+                <Border Classes="screen" IsVisible="{Binding HasCapturedTags}">
+                  <ListBox Classes="compact" ItemsSource="{Binding CapturedTags}" SelectedItem="{Binding SelectedCapturedTag}"
+                           MaxHeight="160">
+                    <ListBox.ItemTemplate>
+                      <DataTemplate x:DataType="vm:CapturedTagItem">
+                        <StackPanel Margin="10,4">
+                          <TextBlock Classes="mono" Text="{Binding Epc}" />
+                          <TextBlock Classes="mono dim" FontSize="11" Text="{Binding Detail}" />
+                        </StackPanel>
+                      </DataTemplate>
+                    </ListBox.ItemTemplate>
+                  </ListBox>
+                </Border>
+
+                <TextBlock Classes="label" Text="OBSERVAÇÃO" Margin="0,6,0,0" />
+                <TextBox Text="{Binding Observacao}" MaxLength="500" AcceptsReturn="True" TextWrapping="Wrap"
+                         Height="64" Watermark="opcional" />
+
+                <StackPanel Orientation="Horizontal" Spacing="8" Margin="0,10,0,0">
+                  <Button Classes="accent" Content="{Binding SaveLabel}" Command="{Binding SaveCommand}" />
+                  <Button Classes="ghost" Content="REMOVER EMBALAGEM" Command="{Binding DeleteCommand}"
+                          IsVisible="{Binding IsEditing}"
+                          ToolTip.Tip="Remove a embalagem e os vínculos. As etiquetas voltam a ser tags avulsas; histórico mantido." />
+                </StackPanel>
+
+                <TextBlock Classes="mono" FontSize="12" Text="{Binding FormMessage}" TextWrapping="Wrap"
+                           Classes.error="{Binding FormMessageIsError}" />
+              </StackPanel>
+            </c:HudBorder>
+          </ScrollViewer>
+
+          <!-- Lista -->
+          <Grid Grid.Column="1" RowDefinitions="Auto,*" RowSpacing="10">
+            <Border Grid.Row="0" Classes="card" Padding="14,10">
+              <DockPanel>
+                <TextBlock DockPanel.Dock="Right" Classes="mono muted" FontSize="12" VerticalAlignment="Center"
+                           Text="{Binding ListMessage}" />
+                <StackPanel Orientation="Horizontal" Spacing="10">
+                  <TextBlock Classes="field" Text="STATUS" />
+                  <ComboBox Width="140" ItemsSource="{Binding StatusFilterOptions}" SelectedIndex="{Binding StatusFilterIndex}" />
+                  <TextBlock Classes="field" Text="BUSCA" Margin="8,0,0,0" />
+                  <TextBox Width="200" Text="{Binding SearchText}" Watermark="código, tipo, EPC">
+                    <TextBox.KeyBindings>
+                      <KeyBinding Gesture="Enter" Command="{Binding SearchCommand}" />
+                    </TextBox.KeyBindings>
+                  </TextBox>
+                  <Button Content="BUSCAR" Command="{Binding SearchCommand}" Classes="accent" />
+                </StackPanel>
+              </DockPanel>
+            </Border>
+
+            <Border Grid.Row="1" Classes="card" Padding="0">
+              <Grid RowDefinitions="Auto,*">
+                <Border Grid.Row="0" Classes="tableHeader">
+                  <Grid ColumnDefinitions="*,80,*,160,44,100,180">
+                    <TextBlock Grid.Column="0" Classes="header" Text="CÓDIGO" />
+                    <TextBlock Grid.Column="1" Classes="header" Text="TIPO" />
+                    <TextBlock Grid.Column="2" Classes="header" Text="DESCRIÇÃO" />
+                    <TextBlock Grid.Column="3" Classes="header" Text="MEDIDAS" />
+                    <TextBlock Grid.Column="4" Classes="header" Text="TAGS" />
+                    <TextBlock Grid.Column="5" Classes="header" Text="STATUS" />
+                    <TextBlock Grid.Column="6" Classes="header" Text="ÚLTIMA DETECÇÃO" />
+                  </Grid>
+                </Border>
+                <ListBox Grid.Row="1" Classes="compact" ItemsSource="{Binding PackagesList}"
+                         SelectedItem="{Binding SelectedPackage}">
+                  <ListBox.ItemTemplate>
+                    <DataTemplate x:DataType="vm:PackageRowItem">
+                      <Border Classes="row">
+                        <Grid ColumnDefinitions="*,80,*,160,44,100,180">
+                          <TextBlock Grid.Column="0" Text="{Binding Codigo}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
+                          <TextBlock Grid.Column="1" Text="{Binding Tipo}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0" />
+                          <TextBlock Grid.Column="2" Text="{Binding Descricao}" TextTrimming="CharacterEllipsis" Margin="0,0,8,0"
+                                     FontFamily="{StaticResource ContentControlThemeFontFamily}" FontSize="13" />
+                          <StackPanel Grid.Column="3" VerticalAlignment="Center" Margin="0,0,8,0">
+                            <TextBlock Classes="muted" FontSize="11" Text="{Binding Medidas}" TextTrimming="CharacterEllipsis" />
+                            <TextBlock Classes="dim" FontSize="10" Text="{Binding Peso}" />
+                          </StackPanel>
+                          <TextBlock Grid.Column="4" Text="{Binding Etiquetas}" />
+                          <TextBlock Grid.Column="5" Classes="status" Classes.dentro="{Binding IsDentro}"
+                                     Classes.nunca="{Binding IsNeverDetected}" Text="{Binding Status}" />
+                          <StackPanel Grid.Column="6" VerticalAlignment="Center">
+                            <TextBlock Classes="muted" Text="{Binding UltimaDeteccao}" />
+                            <TextBlock Classes="dim" FontSize="10" Text="{Binding UltimaDeteccaoDetalhe}"
+                                       IsVisible="{Binding !IsNeverDetected}" />
+                          </StackPanel>
+                        </Grid>
+                      </Border>
+                    </DataTemplate>
+                  </ListBox.ItemTemplate>
+                </ListBox>
+              </Grid>
+            </Border>
+          </Grid>
+        </Grid>
+      </TabItem>
+
       <!-- ═══════════════════════ CONFIGURAÇÕES ═══════════════════════ -->
-      <TabItem Header="05 CONFIGURAÇÕES">
+      <TabItem Header="06 CONFIGURAÇÕES">
         <ScrollViewer>
           <Grid ColumnDefinitions="*,400" ColumnSpacing="10">
             <StackPanel Grid.Column="0" Spacing="10">

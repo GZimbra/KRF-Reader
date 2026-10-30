@@ -22,6 +22,8 @@ public partial class App : Avalonia.Application
             var viewModel = new MainWindowViewModel(
                 _root.Repository,
                 _root.Catalog,
+                _root.Packages,
+                _root.PackageDirectory,
                 _root.ProtocolFactory,
                 _root.ReaderModels,
                 _root.CreatePipeline,

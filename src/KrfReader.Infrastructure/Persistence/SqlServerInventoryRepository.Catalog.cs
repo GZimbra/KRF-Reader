@@ -32,6 +32,7 @@ public sealed partial class SqlServerInventoryRepository
         int rows;
         try
         {
+            await EnsureNotPackageTagAsync(connection, transaction, valid.Epc, cancellationToken).ConfigureAwait(false);
             rows = await connection.ExecuteAsync(new CommandDefinition(sql, new
             {
                 EpcId = valid.Epc,
@@ -155,6 +156,7 @@ public sealed partial class SqlServerInventoryRepository
                    Status, UltimaDeteccao, UltimaAntenaId, UltimaRssi
             FROM dbo.TagsCadastradas
             WHERE {{statusCondition}}
+              AND EmbalagemId IS NULL
               AND (@Pattern IS NULL
                    OR EpcId LIKE @Pattern ESCAPE '\'
                    OR Descricao LIKE @Pattern ESCAPE '\'

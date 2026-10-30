@@ -18,6 +18,12 @@ namespace KrfReader.Application.Pipeline;
 /// com leitura marginal, e portanto tags que nem chegaram a ser lidas.</description></item>
 /// </list>
 /// </para>
+/// <para>
+/// Unidade de contagem = ITEM: embalagem cadastrada com várias etiquetas (<see cref="PackageDirectory"/>) conta uma vez,
+/// e uma rodada "viu" a embalagem se viu qualquer etiqueta dela. Convergência e estimador usam itens: a segunda face de
+/// uma caixa já vista não é tag nova, e a face blindada que nunca respondeu não é item perdido. A taxa de resposta por
+/// EPC (base do Q dinâmico) continua por etiqueta, porque é ela que disputa slot no ar.
+/// </para>
 /// <para>Thread-safe: <see cref="OnRead"/> vem da thread do leitor; o resto, do timer do monitor.</para>
 /// </summary>
 public sealed class PassageTracker
@@ -25,12 +31,13 @@ public sealed class PassageTracker
     private readonly object _gate = new();
     private readonly PassageOptions _options;
     private readonly TimeSpan _silence;
+    private readonly PackageDirectory? _packages;
 
     private Passage? _current;
     private long _nextId = 1;
     private double _minRssi;
 
-    public PassageTracker(PassageOptions options, double minRssi)
+    public PassageTracker(PassageOptions options, double minRssi, PackageDirectory? packages = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentOutOfRangeException.ThrowIfLessThan(options.SilenceMs, 1, nameof(options.SilenceMs));
@@ -38,6 +45,7 @@ public sealed class PassageTracker
         _options = options;
         _silence = TimeSpan.FromMilliseconds(options.SilenceMs);
         _minRssi = minRssi;
+        _packages = packages;
     }
 
     public bool IsActive
@@ -62,7 +70,7 @@ public sealed class PassageTracker
         lock (_gate)
         {
             var p = _current ??= new Passage(_nextId++, mode, read.TimestampUtc);
-            p.Add(read);
+            p.Add(read, _packages);
         }
     }
 
@@ -137,22 +145,36 @@ public sealed class PassageTracker
     {
         var marginalLimit = _minRssi + _options.MarginalRssiMarginDb;
         var tags = new List<PassageTag>(p.Tags.Count);
-        var q1 = 0;
-        var q2 = 0;
         var marginal = 0;
         foreach (var (epc, t) in p.Tags)
         {
             // A rodada corrente (ainda aberta) conta como incidência: a tag foi vista nela.
             var rounds = t.Rounds + (t.InOpenRound ? 1 : 0);
+            var isMarginal = rounds <= 1 || t.MaxRssi < marginalLimit;
+            if (isMarginal)
+                marginal++;
+            tags.Add(new PassageTag(epc, t.Reads, rounds, t.MaxRssi, t.SumRssi / t.Reads, t.FirstUtc, t.LastUtc, isMarginal,
+                t.Package?.Codigo));
+        }
+
+        // Estimador por item: embalagem vista em 2 rodadas por faces diferentes tem incidência 2, não 1+1.
+        var q1 = 0;
+        var q2 = 0;
+        var packages = 0;
+        var partial = 0;
+        foreach (var item in p.Items.Values)
+        {
+            var rounds = item.Rounds + (item.InOpenRound ? 1 : 0);
             if (rounds == 1)
                 q1++;
             else if (rounds == 2)
                 q2++;
-
-            var isMarginal = rounds <= 1 || t.MaxRssi < marginalLimit;
-            if (isMarginal)
-                marginal++;
-            tags.Add(new PassageTag(epc, t.Reads, rounds, t.MaxRssi, t.SumRssi / t.Reads, t.FirstUtc, t.LastUtc, isMarginal));
+            if (item.Package is { } pkg)
+            {
+                packages++;
+                if (item.Epcs < pkg.Etiquetas)
+                    partial++;
+            }
         }
 
         tags.Sort(static (a, b) =>
@@ -177,14 +199,14 @@ public sealed class PassageTracker
         else if (stable < _options.StableRounds)
         {
             verdict = PassageVerdict.NaoConvergiu;
-            issues.Add($"Descoberta não convergiu: {stable} de {_options.StableRounds} rodadas sem EPC novo.");
+            issues.Add($"Descoberta não convergiu: {stable} de {_options.StableRounds} rodadas sem item novo.");
         }
         else if (q1 > 0 || estimatedMissed > _options.MaxEstimatedMissed || p.InvalidFrames > 0)
         {
             // Tag vista em uma rodada só = população com leitura marginal: outra igual pode não ter respondido nenhuma vez.
             verdict = PassageVerdict.Atencao;
             if (q1 > 0)
-                issues.Add($"{q1} tag(s) lida(s) em uma única rodada: há tag com leitura marginal; estimativa de não lidas ~{estimatedMissed:0.#}.");
+                issues.Add($"{q1} item(ns) lido(s) em uma única rodada: há leitura marginal; estimativa de itens não lidos ~{estimatedMissed:0.#}.");
             if (p.InvalidFrames > 0)
                 issues.Add($"{p.InvalidFrames} quadro(s) corrompido(s) no enlace serial durante a passagem.");
         }
@@ -210,7 +232,12 @@ public sealed class PassageTracker
             marginal,
             verdict,
             issues,
-            tags);
+            tags)
+        {
+            DistinctItems = p.Items.Count,
+            Packages = packages,
+            PartialPackages = partial,
+        };
     }
 
     /// <summary>
@@ -234,7 +261,11 @@ public sealed class PassageTracker
         public DateTime StartedUtc { get; } = startedUtc;
         public DateTime LastReadUtc { get; private set; } = startedUtc;
         public Dictionary<string, TagStats> Tags { get; } = new(StringComparer.Ordinal);
+
+        /// <summary>Itens por chave: "P:{id}" para embalagem, o EPC para tag avulsa.</summary>
+        public Dictionary<string, ItemStats> Items { get; } = new(StringComparer.Ordinal);
         public HashSet<string> OpenRound { get; } = new(StringComparer.Ordinal);
+        public HashSet<ItemStats> OpenRoundItems { get; } = [];
         public List<string> DataLoss { get; } = [];
         public long TotalReads { get; private set; }
         public long InvalidFrames { get; set; }
@@ -248,10 +279,10 @@ public sealed class PassageTracker
         private int _newInOpenRound;
         private int _lastNewRound;
 
-        /// <summary>Rodadas com leitura desde a última com EPC novo. Rodada aberta com EPC novo zera.</summary>
+        /// <summary>Rodadas com leitura desde a última com item novo. Rodada aberta com item novo zera.</summary>
         public int StableRounds => _newInOpenRound > 0 ? 0 : Rounds - _lastNewRound;
 
-        public void Add(in TagRead read)
+        public void Add(in TagRead read, PackageDirectory? packages)
         {
             TotalReads++;
             if (read.TimestampUtc > LastReadUtc)
@@ -259,14 +290,25 @@ public sealed class PassageTracker
 
             if (!Tags.TryGetValue(read.Epc, out var t))
             {
-                t = new TagStats(read.TimestampUtc);
+                // Embalagem resolvida uma vez por EPC: mudança no cadastro durante a passagem não reagrupa o que já foi visto.
+                var package = packages?.Find(read.Epc);
+                var key = package is null ? read.Epc : "P:" + package.Id.ToString(System.Globalization.CultureInfo.InvariantCulture);
+                if (!Items.TryGetValue(key, out var item))
+                {
+                    item = new ItemStats(package);
+                    Items.Add(key, item);
+                    _newInOpenRound++;
+                }
+                item.Epcs++;
+                t = new TagStats(read.TimestampUtc, item);
                 Tags.Add(read.Epc, t);
-                _newInOpenRound++;
             }
 
             t.Add(read);
             if (OpenRound.Add(read.Epc))
                 t.InOpenRound = true;
+            if (OpenRoundItems.Add(t.Item))
+                t.Item.InOpenRound = true;
         }
 
         public void CompleteRound()
@@ -288,13 +330,33 @@ public sealed class PassageTracker
                 t.InOpenRound = false;
             }
 
+            foreach (var item in OpenRoundItems)
+            {
+                item.Rounds++;
+                item.InOpenRound = false;
+            }
+
             OpenRound.Clear();
+            OpenRoundItems.Clear();
         }
     }
 
-    private sealed class TagStats(DateTime firstUtc)
+    /// <summary>Item de estoque na passagem: embalagem (várias etiquetas) ou tag avulsa.</summary>
+    private sealed class ItemStats(PackageRef? package)
+    {
+        public PackageRef? Package { get; } = package;
+
+        /// <summary>Etiquetas distintas do item lidas na passagem.</summary>
+        public int Epcs { get; set; }
+        public int Rounds { get; set; }
+        public bool InOpenRound { get; set; }
+    }
+
+    private sealed class TagStats(DateTime firstUtc, ItemStats item)
     {
         public DateTime FirstUtc { get; } = firstUtc;
+        public ItemStats Item { get; } = item;
+        public PackageRef? Package => Item.Package;
         public DateTime LastUtc { get; private set; } = firstUtc;
         public int Reads { get; private set; }
         public int Rounds { get; set; }

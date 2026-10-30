@@ -19,6 +19,11 @@ public interface IInventoryRepository
     /// faz upsert em Tags (UltimaLeitura + antena/RSSI da leitura mais recente sempre; Status/UltimaAtualizacaoStatus
     /// só se mudou) e insere em
     /// Eventos apenas as leituras que geraram evento (Criacao, MudancaStatus, SaidaSemEntrada).
+    /// <para>
+    /// EPC vinculado a embalagem: a decisão usa o status DA EMBALAGEM (chave do item), então a passagem de uma caixa
+    /// com duas etiquetas gera um evento só (o da primeira etiqueta lida, com EmbalagemId). Status/última detecção vão
+    /// para <c>Embalagens</c>; as linhas de Tags das etiquetas acompanham o status da embalagem.
+    /// </para>
     /// Lote vazio = no-op.
     /// </summary>
     Task<BatchResult> ApplyBatchAsync(OperationMode mode, IReadOnlyList<TagRead> reads, CancellationToken cancellationToken = default);
@@ -75,8 +80,12 @@ public sealed record MovementFilter(
     }
 }
 
-/// <summary>Resultado de uma leitura aplicada.</summary>
-public sealed record AppliedRead(TagRead Read, OperationMode Mode, TagStatus? PreviousStatus, TagStatus NewStatus, EventType? Event)
+/// <summary>
+/// Resultado de uma leitura aplicada. Com <paramref name="Package"/>, status e evento são os da embalagem: a segunda
+/// etiqueta da mesma caixa lida no mesmo modo é releitura (Event null).
+/// </summary>
+public sealed record AppliedRead(
+    TagRead Read, OperationMode Mode, TagStatus? PreviousStatus, TagStatus NewStatus, EventType? Event, PackageRef? Package = null)
 {
     public bool ChangedState => Event is not null;
     public bool IsAnomaly => Event == EventType.SaidaSemEntrada;
@@ -87,5 +96,8 @@ public sealed record BatchResult(IReadOnlyList<AppliedRead> Applied)
     public static readonly BatchResult Empty = new([]);
 }
 
-/// <summary>Contadores globais. Anomalias = total de eventos SAIDA_SEM_ENTRADA.</summary>
+/// <summary>
+/// Contadores globais por ITEM de estoque (view <c>ItensEstoque</c>): embalagem conta uma vez, qualquer que seja o número
+/// de etiquetas; tag avulsa conta uma. Anomalias = total de eventos SAIDA_SEM_ENTRADA.
+/// </summary>
 public sealed record InventoryCounters(int Dentro, int Fora, int Anomalias);

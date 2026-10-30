@@ -45,11 +45,13 @@ public sealed class CompositionRoot : IDisposable
                 var sqlite = new SqliteInventoryRepository(databaseOptions, LoggerFactory.CreateLogger<SqliteInventoryRepository>());
                 Repository = sqlite;
                 Catalog = sqlite;
+                Packages = sqlite;
                 break;
             case DatabaseProviders.SqlServer:
                 var sqlServer = new SqlServerInventoryRepository(databaseOptions, LoggerFactory.CreateLogger<SqlServerInventoryRepository>());
                 Repository = sqlServer;
                 Catalog = sqlServer;
+                Packages = sqlServer;
                 break;
             default:
                 throw new NotSupportedException(
@@ -67,6 +69,10 @@ public sealed class CompositionRoot : IDisposable
     public ILoggerFactory LoggerFactory { get; }
     public IInventoryRepository Repository { get; }
     public ITagCatalogRepository Catalog { get; }
+    public IPackageCatalogRepository Packages { get; }
+
+    /// <summary>EPC → embalagem para a passagem. Um só para todos os pipelines (sobrevive à troca de leitor).</summary>
+    public PackageDirectory PackageDirectory { get; } = new();
     public IReaderProtocolFactory ProtocolFactory { get; }
     public IReaderModelCatalog ReaderModels { get; } = ReaderModelCatalog.Default;
 
@@ -142,7 +148,8 @@ public sealed class CompositionRoot : IDisposable
             readerOptions.Inventory ?? new InventoryOptions(),
             PassageOptions,
             PipelineOptions.MinRssi,
-            LoggerFactory.CreateLogger<PassageMonitor>());
+            LoggerFactory.CreateLogger<PassageMonitor>(),
+            packages: PackageDirectory);
         return new PipelineHandle(pipeline, reader, monitor);
     }
 

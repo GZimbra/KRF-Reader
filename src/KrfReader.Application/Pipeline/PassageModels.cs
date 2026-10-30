@@ -31,6 +31,7 @@ public enum PassageVerdict
 /// <summary>Estatística de uma tag dentro da passagem.</summary>
 /// <param name="Rounds">Rodadas distintas em que a tag respondeu (base do estimador).</param>
 /// <param name="IsMarginal">Lida em uma única rodada ou com RSSI perto do limite do filtro.</param>
+/// <param name="PackageCodigo">Embalagem da etiqueta; null = tag avulsa.</param>
 public sealed record PassageTag(
     string Epc,
     int Reads,
@@ -39,14 +40,15 @@ public sealed record PassageTag(
     double AvgRssi,
     DateTime FirstSeenUtc,
     DateTime LastSeenUtc,
-    bool IsMarginal);
+    bool IsMarginal,
+    string? PackageCodigo = null);
 
 /// <summary>Retrato da passagem (ao vivo ou fechada).</summary>
 /// <param name="Rounds">Rodadas com ao menos uma leitura.</param>
-/// <param name="StableRounds">Rodadas com leitura desde o último EPC novo.</param>
-/// <param name="NewInLastRound">EPCs novos na última rodada fechada (taxa de descoberta).</param>
+/// <param name="StableRounds">Rodadas com leitura desde o último item novo (embalagem ou tag avulsa).</param>
+/// <param name="NewInLastRound">Itens novos na última rodada fechada (taxa de descoberta).</param>
 /// <param name="RespondingLastRound">EPCs distintos que responderam na última rodada (base do Q dinâmico).</param>
-/// <param name="EstimatedMissed">Tags provavelmente não lidas, estimador Chao2 por incidência em rodadas.</param>
+/// <param name="EstimatedMissed">Itens provavelmente não lidos, estimador Chao2 por incidência em rodadas.</param>
 /// <param name="Issues">Motivos legíveis do veredito (vazio quando CONFIÁVEL).</param>
 public sealed record PassageSnapshot(
     long Id,
@@ -67,6 +69,15 @@ public sealed record PassageSnapshot(
     IReadOnlyList<string> Issues,
     IReadOnlyList<PassageTag> Tags)
 {
+    /// <summary>Itens distintos: embalagens + tags avulsas. É a contagem que o veredito avalia.</summary>
+    public int DistinctItems { get; init; }
+
+    /// <summary>Embalagens cadastradas detectadas (por qualquer etiqueta).</summary>
+    public int Packages { get; init; }
+
+    /// <summary>Embalagens detectadas com alguma etiqueta não lida (face blindada ou etiqueta com defeito). Não muda o veredito.</summary>
+    public int PartialPackages { get; init; }
+
     public TimeSpan Duration => (EndedUtc ?? Tags.Select(t => t.LastSeenUtc).DefaultIfEmpty(StartedUtc).Max()) - StartedUtc;
 }
 

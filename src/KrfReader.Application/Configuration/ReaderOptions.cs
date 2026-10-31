@@ -61,6 +61,12 @@ public sealed class ReaderOptions
     /// <summary>Anticolisão Gen2 para leitura de muitas tags simultâneas.</summary>
     public InventoryOptions Inventory { get; set; } = new();
 
+    /// <summary>
+    /// Docas por antena: em leitor multiporta, a direção (ENTRADA/SAÍDA) vem da porta que leu, e as duas docas operam
+    /// ao mesmo tempo no modo POR ANTENA. Vazio = só modo manual.
+    /// </summary>
+    public DockOptions Docks { get; set; } = new();
+
     /// <summary>Potência efetiva de uma porta: a individual, se houver, senão <see cref="PowerDbm"/>.</summary>
     public double PowerFor(int antenna) =>
         AntennaPowerDbm is not null && AntennaPowerDbm.TryGetValue(antenna, out var dbm) ? dbm : PowerDbm;
@@ -68,6 +74,33 @@ public sealed class ReaderOptions
     /// <summary>Portas ativas (sem repetição, em ordem) com a potência efetiva de cada uma.</summary>
     public IReadOnlyList<Readers.AntennaPort> ActivePorts() =>
         (Antennas ?? []).Where(a => a >= 1).Distinct().Order().Select(a => new Readers.AntennaPort(a, PowerFor(a))).ToArray();
+}
+
+/// <summary>
+/// Seção <c>Reader:Docks</c>. Antenas de cada doca (portas físicas, disjuntas) e a arbitragem de leitura cruzada:
+/// tag na doca de entrada pode ser vista, mais fraca, pelas antenas da saída (lóbulo lateral, reflexão em metal).
+/// </summary>
+public sealed class DockOptions
+{
+    /// <summary>Portas da doca de ENTRADA: leitura nelas leva o item a DENTRO.</summary>
+    public int[] EntradaAntennas { get; set; } = [];
+
+    /// <summary>Portas da doca de SAÍDA: leitura nelas leva o item a FORA.</summary>
+    public int[] SaidaAntennas { get; set; } = [];
+
+    /// <summary>
+    /// Janela de arbitragem: a primeira leitura de um EPC espera este tempo; se as duas docas o virem, vence a de maior
+    /// RSSI de pico. 0 = decide na primeira leitura (sem proteção contra leitura cruzada no início da passagem).
+    /// </summary>
+    public int ArbitrationMs { get; set; } = 300;
+
+    /// <summary>
+    /// Retenção de zona: com o EPC decidido numa doca, leituras dele na outra doca são descartadas como cruzadas até
+    /// ele ficar este tempo sem ser lido na doca decidida.
+    /// </summary>
+    public int ZoneHoldMs { get; set; } = 3000;
+
+    public bool IsConfigured => (EntradaAntennas?.Length ?? 0) + (SaidaAntennas?.Length ?? 0) > 0;
 }
 
 /// <summary>Alternância de target entre rodadas.</summary>

@@ -15,14 +15,18 @@ namespace KrfReader.Application.Pipeline;
 /// população que respondeu na rodada anterior (2^Q ≈ n: no ALOHA com quadro de L slots e n tags, a eficiência
 /// n/L·(1−1/L)^(n−1) é máxima em L = n).</description></item>
 /// </list>
-/// Só atua com modo ativo (ENTRADA/SAÍDA); a passagem fecha no PARAR ou na troca de modo.
+/// Só atua com operação ativa; a passagem fecha no PARAR ou na troca de modo. Há um <see cref="PassageTracker"/> por
+/// direção: no modo POR ANTENA as duas docas têm passagens independentes e simultâneas (numeração compartilhada).
 /// </summary>
 public sealed class PassageMonitor : IAsyncDisposable
 {
     private readonly IInventoryPipeline _pipeline;
     private readonly IRfidReader _reader;
     private readonly InventoryOptions _inventory;
-    private readonly PassageTracker _tracker;
+    private readonly PassageTracker _entrada;
+    private readonly PassageTracker _saida;
+    private readonly PassageTracker[] _trackers;
+    private long _passageIds;
     private readonly ILogger _logger;
     private readonly TimeProvider _time;
     private readonly TimeSpan _round;
@@ -54,14 +58,16 @@ public sealed class PassageMonitor : IAsyncDisposable
         _pipeline = pipeline;
         _reader = reader;
         _inventory = inventory;
-        _tracker = new PassageTracker(passage, minRssi, packages);
+        _entrada = new PassageTracker(passage, minRssi, packages, NextPassageId);
+        _saida = new PassageTracker(passage, minRssi, packages, NextPassageId);
+        _trackers = [_entrada, _saida];
         _logger = (ILogger?)logger ?? NullLogger.Instance;
         _time = timeProvider ?? TimeProvider.System;
         _round = TimeSpan.FromMilliseconds(inventory.TargetDwellMs);
         _lastDiagnostics = Diagnostics();
 
         _pipeline.ReadAccepted += OnReadAccepted;
-        _pipeline.ModeChanged += OnModeChanged;
+        _pipeline.OperationChanged += OnOperationChanged;
         _pipeline.Error += OnPipelineError;
     }
 
@@ -71,7 +77,8 @@ public sealed class PassageMonitor : IAsyncDisposable
     /// <summary>Passagem fechada, com veredito final (thread do timer ou de quem chamou PARAR).</summary>
     public event EventHandler<PassageSnapshot>? PassageClosed;
 
-    public PassageTracker Tracker => _tracker;
+    /// <summary>Tracker da direção (doca).</summary>
+    public PassageTracker TrackerFor(OperationMode mode) => mode == OperationMode.Entrada ? _entrada : _saida;
 
     public InventoryControlState ControlState
     {
@@ -95,7 +102,11 @@ public sealed class PassageMonitor : IAsyncDisposable
         _loop = Task.Run(() => LoopAsync(ct), CancellationToken.None);
     }
 
-    public void SetMinRssi(double minRssi) => _tracker.SetMinRssi(minRssi);
+    public void SetMinRssi(double minRssi)
+    {
+        foreach (var t in _trackers)
+            t.SetMinRssi(minRssi);
+    }
 
     /// <summary>
     /// Uma rodada: fecha a rodada no tracker e ajusta Q/target. Chamado pelo timer; público para teste determinístico.
@@ -106,13 +117,22 @@ public sealed class PassageMonitor : IAsyncDisposable
         try
         {
             CollectIntegrity();
-            var (live, closed) = _tracker.CompleteRound(_time.GetUtcNow().UtcDateTime);
-            if (closed is not null)
-                RaiseClosed(closed);
-            if (live is not null)
-                Raise(PassageUpdated, live);
+            var now = _time.GetUtcNow().UtcDateTime;
+            var responding = 0;
+            foreach (var tracker in _trackers)
+            {
+                var (live, closed) = tracker.CompleteRound(now);
+                if (closed is not null)
+                    RaiseClosed(closed);
+                if (live is not null)
+                {
+                    Raise(PassageUpdated, live);
+                    // Leitor multiporta inventaria uma porta por vez: Q dimensionado para a maior população de uma doca.
+                    responding = Math.Max(responding, live.RespondingLastRound);
+                }
+            }
 
-            await TuneAsync(live, cancellationToken).ConfigureAwait(false);
+            await TuneAsync(responding, cancellationToken).ConfigureAwait(false);
         }
         finally
         {
@@ -132,7 +152,7 @@ public sealed class PassageMonitor : IAsyncDisposable
     public async ValueTask DisposeAsync()
     {
         _pipeline.ReadAccepted -= OnReadAccepted;
-        _pipeline.ModeChanged -= OnModeChanged;
+        _pipeline.OperationChanged -= OnOperationChanged;
         _pipeline.Error -= OnPipelineError;
 
         if (_cts is { } cts)
@@ -152,8 +172,7 @@ public sealed class PassageMonitor : IAsyncDisposable
             cts.Dispose();
         }
 
-        if (_tracker.Close(_time.GetUtcNow().UtcDateTime, "leitor encerrado") is { } closed)
-            RaiseClosed(closed);
+        CloseAll("leitor encerrado");
     }
 
     private async Task LoopAsync(CancellationToken ct)
@@ -178,10 +197,10 @@ public sealed class PassageMonitor : IAsyncDisposable
         }
     }
 
-    private async Task TuneAsync(PassageSnapshot? live, CancellationToken ct)
+    private async Task TuneAsync(int responding, CancellationToken ct)
     {
         if (_reader is not IInventoryTuning { IsTuningSupported: true } tuning
-            || _pipeline.CurrentMode is null
+            || _pipeline.CurrentOperation is null
             || !_reader.IsInventoryRunning
             || !_reader.IsConnected)
         {
@@ -193,7 +212,7 @@ public sealed class PassageMonitor : IAsyncDisposable
             ? (current.Target == InventoryTarget.A ? InventoryTarget.B : InventoryTarget.A)
             : InventoryTarget.A;
         var q = _inventory.AdaptiveQ
-            ? NextQ(live?.RespondingLastRound ?? 0, _inventory.InitialQ, _inventory.MinQ, _inventory.MaxQ)
+            ? NextQ(responding, _inventory.InitialQ, _inventory.MinQ, _inventory.MaxQ)
             : Math.Clamp(_inventory.InitialQ, InventoryParameters.MinQ, InventoryParameters.MaxQ);
         var next = current with { Session = _inventory.Session, Target = target, Q = q };
         if (next == current)
@@ -206,34 +225,46 @@ public sealed class PassageMonitor : IAsyncDisposable
     {
         var dropped = _pipeline.GetStats().QueueDropped;
         var newDrops = dropped - Interlocked.Exchange(ref _lastQueueDropped, dropped);
-        if (newDrops > 0)
-            _tracker.ReportDataLoss($"{newDrops} leitura(s) descartada(s) por fila cheia.");
-
         var d = Diagnostics();
-        if (d.LinkDrops > _lastDiagnostics.LinkDrops)
-            _tracker.ReportDataLoss("Conexão com o leitor caiu durante a passagem.");
-        _tracker.ReportInvalidFrames(d.InvalidFrames - _lastDiagnostics.InvalidFrames);
-        _lastDiagnostics = d;
+        var errors = Interlocked.Exchange(ref _pendingErrors, 0) > 0;
+        // Perda fora do RF não tem doca: vale para todas as passagens abertas.
+        foreach (var tracker in _trackers)
+        {
+            if (newDrops > 0)
+                tracker.ReportDataLoss($"{newDrops} leitura(s) descartada(s) por fila cheia.");
+            if (d.LinkDrops > _lastDiagnostics.LinkDrops)
+                tracker.ReportDataLoss("Conexão com o leitor caiu durante a passagem.");
+            tracker.ReportInvalidFrames(d.InvalidFrames - _lastDiagnostics.InvalidFrames);
+            if (errors)
+                tracker.ReportDataLoss("Erro de leitor/gravação durante a passagem (ver barra de status).");
+        }
 
-        if (Interlocked.Exchange(ref _pendingErrors, 0) > 0)
-            _tracker.ReportDataLoss("Erro de leitor/gravação durante a passagem (ver barra de status).");
+        _lastDiagnostics = d;
     }
 
     private ReaderDiagnostics Diagnostics() =>
         _reader is IReaderDiagnosticsSource source ? source.GetDiagnostics() : default;
 
-    private void OnReadAccepted(object? sender, AcceptedRead e) => _tracker.OnRead(e.Read, e.Mode);
+    private long NextPassageId() => Interlocked.Increment(ref _passageIds);
 
-    private void OnModeChanged(object? sender, OperationMode? mode)
+    private void OnReadAccepted(object? sender, AcceptedRead e) => TrackerFor(e.Mode).OnRead(e.Read, e.Mode);
+
+    private void OnOperationChanged(object? sender, InventoryOperation? operation) =>
+        CloseAll(operation is null ? "PARAR" : "troca de modo");
+
+    private void CloseAll(string reason)
     {
-        var reason = mode is null ? "PARAR" : "troca de modo";
-        if (_tracker.Close(_time.GetUtcNow().UtcDateTime, reason) is { } closed)
-            RaiseClosed(closed);
+        var now = _time.GetUtcNow().UtcDateTime;
+        foreach (var tracker in _trackers)
+        {
+            if (tracker.Close(now, reason) is { } closed)
+                RaiseClosed(closed);
+        }
     }
 
     private void OnPipelineError(object? sender, string message)
     {
-        if (_tracker.IsActive)
+        if (_trackers.Any(t => t.IsActive))
             Interlocked.Increment(ref _pendingErrors);
     }
 

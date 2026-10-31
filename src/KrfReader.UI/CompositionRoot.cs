@@ -118,6 +118,10 @@ public sealed class CompositionRoot : IDisposable
         // O binder ANEXA itens de array ao valor padrão (ex.: Antennas = [1] + [1,2] = [1,1,2]):
         // quando a chave existe no JSON, ela substitui o padrão.
         reader.Antennas = ReadArray(configuration, $"{ReaderOptions.SectionName}:{nameof(ReaderOptions.Antennas)}") ?? reader.Antennas;
+        var docksKey = $"{ReaderOptions.SectionName}:{nameof(ReaderOptions.Docks)}";
+        reader.Docks ??= new DockOptions();
+        reader.Docks.EntradaAntennas = ReadArray(configuration, $"{docksKey}:{nameof(DockOptions.EntradaAntennas)}") ?? reader.Docks.EntradaAntennas;
+        reader.Docks.SaidaAntennas = ReadArray(configuration, $"{docksKey}:{nameof(DockOptions.SaidaAntennas)}") ?? reader.Docks.SaidaAntennas;
         pipeline.AllowedAntennas = ReadArray(configuration, $"{PipelineOptions.SectionName}:{nameof(PipelineOptions.AllowedAntennas)}") ?? pipeline.AllowedAntennas;
 
         return new CompositionRoot(configuration, reader, pipeline, passage, database);

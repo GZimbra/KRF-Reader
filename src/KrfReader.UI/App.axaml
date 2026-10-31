@@ -328,6 +328,15 @@
       <Setter Property="Background" Value="{StaticResource BrandOrangeBrush}" />
       <Setter Property="BoxShadow" Value="0 0 10 1 #80FFA600" />
     </Style>
+    <Style Selector="Button.key.docas.active">
+      <Setter Property="Background" Value="#2A2110" />
+      <Setter Property="BorderBrush" Value="{StaticResource BrandOrangeBrush}" />
+      <Setter Property="Foreground" Value="{StaticResource BrandOrangeBrush}" />
+    </Style>
+    <Style Selector="Button.key.docas.active Border.keyLed">
+      <Setter Property="Background" Value="{StaticResource BrandOrangeBrush}" />
+      <Setter Property="BoxShadow" Value="0 0 10 1 #80FFA600" />
+    </Style>
     <Style Selector="Button.key.active:pointerover /template/ ContentPresenter#PART_ContentPresenter">
       <Setter Property="Foreground" Value="{Binding $parent[Button].Foreground}" />
     </Style>

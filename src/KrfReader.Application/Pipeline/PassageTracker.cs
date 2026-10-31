@@ -34,10 +34,12 @@ public sealed class PassageTracker
     private readonly PackageDirectory? _packages;
 
     private Passage? _current;
-    private long _nextId = 1;
+    private readonly Func<long> _nextId;
+    private long _localId;
     private double _minRssi;
 
-    public PassageTracker(PassageOptions options, double minRssi, PackageDirectory? packages = null)
+    /// <param name="nextId">Numeração compartilhada entre trackers (uma passagem por doca no modo POR ANTENA); null = própria.</param>
+    public PassageTracker(PassageOptions options, double minRssi, PackageDirectory? packages = null, Func<long>? nextId = null)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentOutOfRangeException.ThrowIfLessThan(options.SilenceMs, 1, nameof(options.SilenceMs));
@@ -46,6 +48,7 @@ public sealed class PassageTracker
         _silence = TimeSpan.FromMilliseconds(options.SilenceMs);
         _minRssi = minRssi;
         _packages = packages;
+        _nextId = nextId ?? (() => ++_localId);
     }
 
     public bool IsActive
@@ -69,7 +72,7 @@ public sealed class PassageTracker
     {
         lock (_gate)
         {
-            var p = _current ??= new Passage(_nextId++, mode, read.TimestampUtc);
+            var p = _current ??= new Passage(_nextId(), mode, read.TimestampUtc);
             p.Add(read, _packages);
         }
     }

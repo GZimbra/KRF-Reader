@@ -227,7 +227,7 @@
           </Grid>
 
           <!-- Teclas de modo -->
-          <Grid Grid.Row="1" ColumnDefinitions="*,*,*" ColumnSpacing="10">
+          <Grid Grid.Row="1" ColumnDefinitions="*,*,*,*" ColumnSpacing="10">
             <Button Grid.Column="0" Classes="key entrada" Classes.active="{Binding IsEntradaActive}"
                     Command="{Binding EntradaCommand}" ToolTip.Tip="Tags lidas passam a DENTRO do estoque">
               <DockPanel>
@@ -248,7 +248,18 @@
                 </StackPanel>
               </DockPanel>
             </Button>
-            <Button Grid.Column="2" Classes="key parar" Classes.active="{Binding IsStopped}"
+            <Button Grid.Column="2" Classes="key docas" Classes.active="{Binding IsDocksActive}"
+                    Command="{Binding DocasCommand}"
+                    ToolTip.Tip="Entrada e saída ao mesmo tempo: a antena que leu define a direção (leitor multiporta, docas em Configuração)">
+              <DockPanel>
+                <Border DockPanel.Dock="Top" Classes="keyLed" />
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center" Spacing="2">
+                  <TextBlock HorizontalAlignment="Center" FontSize="20" FontWeight="Bold" LetterSpacing="4" Text="▲▼ DOCAS" />
+                  <TextBlock HorizontalAlignment="Center" FontSize="10" LetterSpacing="2" Opacity="0.7" Text="{Binding DocksKeyHint}" />
+                </StackPanel>
+              </DockPanel>
+            </Button>
+            <Button Grid.Column="3" Classes="key parar" Classes.active="{Binding IsStopped}"
                     Command="{Binding PararCommand}" ToolTip.Tip="Para o inventário e grava as leituras pendentes">
               <DockPanel>
                 <Border DockPanel.Dock="Top" Classes="keyLed" />
@@ -309,10 +320,15 @@
             <c:HudBorder Grid.Column="0" Classes="card" Padding="0"
                          Classes.entrada="{Binding IsEntradaActive}" Classes.saida="{Binding IsSaidaActive}">
               <Grid RowDefinitions="Auto,Auto,Auto,Auto,Auto,*">
-                <DockPanel Grid.Row="0" Margin="14,8,14,4">
-                  <TextBlock DockPanel.Dock="Right" Classes="label" VerticalAlignment="Center" Text="{Binding PassageStateText}" />
-                  <TextBlock Classes="sectionTitle" VerticalAlignment="Center" Text="{Binding PassageTitle}" />
-                </DockPanel>
+                <StackPanel Grid.Row="0" Margin="14,8,14,4" Spacing="2">
+                  <DockPanel>
+                    <TextBlock DockPanel.Dock="Right" Classes="label" VerticalAlignment="Center" Text="{Binding PassageStateText}" />
+                    <TextBlock Classes="sectionTitle" VerticalAlignment="Center" Text="{Binding PassageTitle}" />
+                  </DockPanel>
+                  <TextBlock Classes="mono" FontSize="11" Foreground="{StaticResource BrandOrangeBrush}" TextWrapping="Wrap"
+                             IsVisible="{Binding OtherPassageText, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"
+                             Text="{Binding OtherPassageText}" />
+                </StackPanel>
 
                 <!-- Veredito + métricas -->
                 <Grid Grid.Row="1" ColumnDefinitions="Auto,*,*,*,*" ColumnSpacing="10" Margin="14,2,14,6">
@@ -1017,6 +1033,22 @@
                     <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
                       <TextBox Width="160" Classes="mono" Text="{Binding AntennaPowerText}" Watermark="1:30; 2:27" />
                       <TextBlock Classes="hint" Text="porta:dBm · vazio = mesma potência em todas" />
+                    </StackPanel>
+                  </Grid>
+
+                  <Grid ColumnDefinitions="150,*">
+                    <TextBlock Classes="field" Text="DOCA ENTRADA" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                      <TextBox Width="160" Classes="mono" Text="{Binding DockEntradaText}" Watermark="ex.: 1,2" />
+                      <TextBlock Classes="hint" Text="antenas cuja leitura leva a DENTRO · tecla DOCAS" />
+                    </StackPanel>
+                  </Grid>
+
+                  <Grid ColumnDefinitions="150,*">
+                    <TextBlock Classes="field" Text="DOCA SAÍDA" />
+                    <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="10">
+                      <TextBox Width="160" Classes="mono" Text="{Binding DockSaidaText}" Watermark="ex.: 3,4" />
+                      <TextBlock Classes="hint" Text="antenas cuja leitura leva a FORA · vazio nas duas = só manual" />
                     </StackPanel>
                   </Grid>
 

@@ -11,14 +11,14 @@
     <img src="https://img.shields.io/badge/Banco-SQLite%20%7C%20SQL%20Server%20%2B%20Dapper-003B57?style=flat-square&amp;logo=sqlite&amp;logoColor=white" alt="SQLite ou SQL Server com Dapper" />
     <img src="https://img.shields.io/badge/Leitor-R200%20%7C%20R2000%20%7C%20LLRP%20%7C%20Impinj%20IoT-191919?style=flat-square" alt="Leitor R200, R2000, LLRP ou Impinj IoT" />
     <img src="https://img.shields.io/badge/Plataformas-Windows%20%7C%20Linux%20%7C%20macOS-555555?style=flat-square" alt="Windows, Linux e macOS" />
-    <img src="https://img.shields.io/badge/Testes-403%20casos%20xUnit-2E7D32?style=flat-square" alt="403 casos de teste xUnit" />
+    <img src="https://img.shields.io/badge/Testes-421%20casos%20xUnit-2E7D32?style=flat-square" alt="421 casos de teste xUnit" />
   </p>
 </div>
 
 > [!WARNING]
 > O app não tem modo simulado: ele sobe conectando no leitor **R200** (COM3, 115200, 915–928 MHz). Com o R200 real
 > foram validados identificação, potência, região/canais, início e parada do inventário. **A leitura de tags com
-> hardware real nunca foi validada**: o leitor foi testado sem antena. O pipeline foi coberto por 403 testes
+> hardware real nunca foi validada**: o leitor foi testado sem antena. O pipeline foi coberto por 421 testes
 > automatizados, que usam um simulador que só existe no projeto de testes.
 > Os drivers de leitores industriais (**LLRP** para Impinj R700/Speedway e Zebra FX9600/FX7500, **Impinj IoT REST**
 > para o R700, **R2000 multiporta** para Chafon CF-RU5106 e similares) seguem as especificações publicadas e foram
@@ -36,6 +36,7 @@
   - [Regras de negócio](#regras-de-negócio)
   - [Cadastro de tags](#cadastro-de-tags)
   - [Embalagens com várias etiquetas](#embalagens-com-várias-etiquetas)
+  - [Docas por antena](#docas-por-antena)
   - [Banco de dados](#banco-de-dados)
   - [Power BI em tempo real](#power-bi-em-tempo-real)
   - [Pipeline de leituras](#pipeline-de-leituras)
@@ -59,6 +60,8 @@ O **KRF Reader** controla entrada e saída de estoque num portal RFID UHF. O ope
 
 - **ENTRADA:** toda tag lida fica `DENTRO`.
 - **SAÍDA:** toda tag lida fica `FORA`.
+- **DOCAS:** entrada e saída ao mesmo tempo, num leitor multiporta só. A antena que leu define a direção
+  (ex.: antenas 1-2 na doca de entrada, 3-4 na doca de saída). Ver [Docas por antena](#docas-por-antena).
 - **PARAR:** encerra o inventário e grava o que já foi lido no modo vigente.
 
 A tag carrega apenas o EPC. Toda a lógica de estoque fica no sistema e no banco. Não há servidor, nuvem ou
@@ -90,7 +93,7 @@ KRF-Reader/
 │   ├── KrfReader.Application/
 │   │   ├── Configuration/             # ReaderOptions (+ Inventory), PipelineOptions, PassageOptions, DatabaseOptions
 │   │   ├── Persistence/               # IInventoryRepository, ITagCatalogRepository, IPackageCatalogRepository
-│   │   ├── Pipeline/                  # InventoryPipeline, Deduplicator, ReadFilter, ModeState, PassageTracker, PassageMonitor, PackageDirectory
+│   │   ├── Pipeline/                  # InventoryPipeline, Deduplicator, ReadFilter, ModeState, DirectionArbiter, PassageTracker, PassageMonitor, PackageDirectory
 │   │   └── Readers/                   # IRfidReader, IReaderProtocol, IRfidReaderFactory, InventoryTuning (Gen2), RadioSetup (portas, Anatel)
 │   ├── KrfReader.Infrastructure/
 │   │   ├── Persistence/               # Sqlite/SqlServerInventoryRepository, BatchPlanner, migradores
@@ -107,8 +110,10 @@ KRF-Reader/
 | [Domain/TagRegistration.cs](src/KrfReader.Domain/TagRegistration.cs) | Cadastro de tag e validação (EPC Gen2, descrição obrigatória). |
 | [Domain/Package.cs](src/KrfReader.Domain/Package.cs) | Embalagem com várias etiquetas e validação (código, tipo, medidas, peso, 1–8 EPCs). |
 | [Pipeline/InventoryPipeline.cs](src/KrfReader.Application/Pipeline/InventoryPipeline.cs) | Channels de entrada e persistência, workers particionados por EPC, lote, barreira de PARAR e shutdown. |
-| [Pipeline/ModeState.cs](src/KrfReader.Application/Pipeline/ModeState.cs) | Modo atual e geração; carimba cada leitura na chegada. |
-| [Pipeline/Deduplicator.cs](src/KrfReader.Application/Pipeline/Deduplicator.cs) | Ignora a mesma tag na mesma geração dentro de `DedupWindowSeconds`. |
+| [Pipeline/ModeState.cs](src/KrfReader.Application/Pipeline/ModeState.cs) | Operação atual (manual ou DOCAS) e geração; carimba cada leitura na chegada. |
+| [Pipeline/AntennaDirectionMap.cs](src/KrfReader.Application/Pipeline/AntennaDirectionMap.cs) | Mapa porta → doca do modo DOCAS e validação (portas disjuntas e ativas). |
+| [Pipeline/DirectionArbiter.cs](src/KrfReader.Application/Pipeline/DirectionArbiter.cs) | Arbitragem de leitura cruzada entre docas: RSSI de pico na primeira leitura, retenção de zona depois. |
+| [Pipeline/Deduplicator.cs](src/KrfReader.Application/Pipeline/Deduplicator.cs) | Ignora a mesma tag na mesma geração e direção dentro de `DedupWindowSeconds`. |
 | [Pipeline/ReadFilter.cs](src/KrfReader.Application/Pipeline/ReadFilter.cs) | Filtro de RSSI mínimo e antenas aceitas. |
 | [Readers/StreamRfidReaderBase.cs](src/KrfReader.Infrastructure/Readers/StreamRfidReaderBase.cs) | Base de serial/TCP: transporte, reconexão e threading. |
 | [Readers/Protocols/AsciiLineProtocol.cs](src/KrfReader.Infrastructure/Readers/Protocols/AsciiLineProtocol.cs) | Parser `EPC,RSSI,ANTENA[,TIMESTAMP]` com frames parciais. |
@@ -163,7 +168,7 @@ KRF-Reader/
 
 <br/>
 
-**OPERAÇÃO.** Botões ENTRADA, SAÍDA e PARAR. Mostra o modo ativo, o status do leitor, os contadores (itens dentro, itens fora, lidas nesta sessão; embalagem conta uma vez), o painel **PASSAGEM** (veredito, itens, rodadas estáveis, estimativa de não lidas, tabela de tags com as marginais no topo, Q/session/target em uso) e as últimas 200 leituras gravadas no estoque. Detalhes em [Leitura de muitas tags](#leitura-de-muitas-tags-passagem).
+**OPERAÇÃO.** Botões ENTRADA, SAÍDA, DOCAS e PARAR. DOCAS só habilita com docas configuradas e leitor multiporta. Mostra o modo ativo, o status do leitor, os contadores (itens dentro, itens fora, lidas nesta sessão; embalagem conta uma vez), o painel **PASSAGEM** (veredito, itens, rodadas estáveis, estimativa de não lidas, tabela de tags com as marginais no topo, Q/session/target em uso) e as últimas 200 leituras gravadas no estoque. Detalhes em [Leitura de muitas tags](#leitura-de-muitas-tags-passagem).
 
 **CONSULTA.** Busca por trecho de EPC, descrição ou SKU. Mostra descrição do cadastro, status atual, última leitura e última mudança de cada tag.
 
@@ -183,7 +188,7 @@ lida por último. Detalhes em [Embalagens com várias etiquetas](#embalagens-com
 
 - *Leitor RFID*: modelo do catálogo, tipo (Serial, TCP/IP, LLRP, Impinj IoT), porta serial e baud, IP e porta, protocolo
   (Serial/TCP), usuário/senha da API (Impinj IoT), potência, antenas ativas, potência por porta (`1:30; 2:27`) e
-  exigência da faixa 915–928 MHz. Só vale após **Aplicar leitor**, que desconecta e reconecta. Exige modo PARADO.
+  exigência da faixa 915–928 MHz, antenas da doca de ENTRADA e da doca de SAÍDA. Só vale após **Aplicar leitor**, que desconecta e reconecta. Exige modo PARADO.
   Leitores LLRP/REST se identificam ao conectar (modelo, firmware, portas, potência real e canais em uso).
 - *Filtro de leituras*: RSSI mínimo e antenas aceitas. Vale na hora, sem reconectar.
 - *Anticolisão · muitas tags*: session Gen2, target (A fixo ou A↔B), duração da rodada, Q inicial, Q dinâmico e prefixo de Select. Vale ao aplicar o leitor.
@@ -248,6 +253,40 @@ encostada em metal ou virada para longe da antena pode não responder; a outra c
 - **Tag avulsa não muda**: EPC sem embalagem continua sendo 1 EPC = 1 item.
 - **Remover embalagem** apaga o cadastro e os vínculos; as etiquetas voltam a ser tags avulsas e o histórico continua
   em `Eventos` com o `EmbalagemId` antigo.
+
+### Docas por antena
+
+Um programa e um leitor multiporta atendem as duas docas. No modo **DOCAS** a direção não vem do operador, vem da porta
+que leu: `Reader:Docks:EntradaAntennas` levam o item a DENTRO, `SaidaAntennas` a FORA. As duas docas operam ao mesmo
+tempo. Leitor de 1 porta (R200) continua com ENTRADA/SAÍDA manual: a tela recusa docas num perfil de 1 porta.
+
+<div align="center">
+  <img src="docs/screenshots/docas.png" width="820" alt="KRF Reader: modo DOCAS com entrada e saída simultâneas" />
+  <br/><sub>DOCAS: antenas 1-2 na entrada, 3-4 na saída, 64 leituras cruzadas descartadas (leitor falso AsciiLine em TCP)</sub>
+</div>
+
+| Situação | Comportamento |
+|---|---|
+| Porta numa doca | Leitura vai para o estoque com a direção da doca. Regra de transição, embalagem e anomalia iguais ao modo manual. |
+| Porta fora das docas | Não movimenta estoque. Contada em *sem doca* na linha de estatística. |
+| EPC visto pelas duas docas na primeira leitura | Fica retido `ArbitrationMs` (300 ms). Vence a doca de maior RSSI de pico (empate: mais leituras). A outra é descartada como *cruzada*. |
+| EPC já decidido, lido na outra doca | Descartado como cruzada enquanto ainda é lido na doca decidida há menos de `ZoneHoldMs` (3000 ms). |
+| Item sai de uma doca e vai para a outra | Depois de `ZoneHoldMs` sem leitura na doca anterior, a nova leitura reabre a arbitragem e gera a movimentação. |
+| PARAR / fechar o app | Arbitragens pendentes são decididas e gravadas antes de parar. |
+| Passagem | Uma por doca, independentes e simultâneas, com numeração única. O painel fica na passagem ao vivo que abriu primeiro; a da outra doca aparece resumida em laranja acima. |
+
+- **Configuração.** Aba Configuração, campos *DOCA ENTRADA* e *DOCA SAÍDA* (portas separadas por vírgula). As portas
+  precisam estar em *Antenas ativas* e não podem estar nas duas docas. Uma doca só (só entrada, por exemplo) é válida.
+- **Deduplicação por direção.** Na mesma sessão, o mesmo EPC na outra doca não é duplicata: é movimento novo.
+- **Lote em ordem.** O lote de gravação mistura direções e é aplicado em trechos consecutivos de mesma direção, na ordem
+  de chegada: entrar e sair na mesma janela de 500 ms grava DENTRO e depois FORA.
+- **Rastreio.** `Eventos.AntenaId` já identifica a doca de cada movimentação; não houve mudança de schema.
+
+> [!CAUTION]
+> A arbitragem reduz leitura cruzada, não elimina. Docas lado a lado sem blindagem (parede, cortina RF, distância) e
+> com antenas apontadas uma para a outra geram cruzadas fortes o bastante para ganhar a arbitragem. Instale as docas
+> separadas, antenas viradas para fora da outra doca, e calibre `PowerDbm`/`AntennaPowerDbm` e `MinRssi` olhando o
+> contador *cruzadas*. Nada disso foi validado em hardware.
 
 ### Banco de dados
 
@@ -549,7 +588,7 @@ repositório só carrega o estado dos EPCs e grava o plano numa transação.
 ```bash
 git clone https://github.com/GZimbra/KRF-Reader.git && cd KRF-Reader
 dotnet run  --project src/KrfReader.UI        # conecta no R200 (COM3)
-dotnet test KrfReader.sln                     # 403 casos; os 53 de SQL Server pulam sem KRF_TEST_SQLSERVER
+dotnet test KrfReader.sln                     # 421 casos; os 53 de SQL Server pulam sem KRF_TEST_SQLSERVER
 dotnet publish src/KrfReader.UI -c Release -r win-x64   --self-contained -p:PublishSingleFile=true -o publish/win-x64
 dotnet publish src/KrfReader.UI -c Release -r linux-x64 --self-contained -p:PublishSingleFile=true -o publish/linux-x64
 ```
@@ -578,6 +617,9 @@ Fontes (a última vence): `src/KrfReader.UI/appsettings.json` → `appsettings.L
 | | `Llrp.KeepaliveMs` / `ResponseTimeoutMs` / `ResetToFactoryDefault` | Watchdog (5000), espera por resposta (5000), reset LLRP ao conectar (`true`) |
 | | `ImpinjIot.UseHttps` / `Username` / `Password` / `AllowSelfSignedCertificate` / `PresetId` | API REST do R700 (`root`/`impinj` de fábrica) |
 | | `ReconnectDelayMs` | Espera entre tentativas de reconexão automática |
+| `Reader.Docks` | `EntradaAntennas` / `SaidaAntennas` | Portas de cada doca do modo DOCAS (`[]` nas duas = só manual) |
+| | `ArbitrationMs` | Retenção da primeira leitura para decidir a doca por RSSI (300 ms; 0 = sem arbitragem) |
+| | `ZoneHoldMs` | Tempo sem leitura na doca decidida para aceitar a outra doca (3000 ms) |
 | `Pipeline` | `DedupWindowSeconds` | Janela de deduplicação |
 | | `MinRssi` | RSSI mínimo aceito (dBm). Filtro de leitura fantasma. |
 | | `AllowedAntennas` | Antenas aceitas pelo filtro (`[]` = todas) |
@@ -603,7 +645,7 @@ Fontes (a última vence): `src/KrfReader.UI/appsettings.json` → `appsettings.L
 | Pasta | Cobre |
 |---|---|
 | `Domain/` | `InventoryRules.Decide` (tabela completa), normalização de EPC, validação do cadastro, literais do banco |
-| `Pipeline/` | Deduplicação por geração, filtro RSSI/antena, troca de modo, barreira de PARAR, shutdown, concorrência do estado de modo, captura para cadastro |
+| `Pipeline/` | Deduplicação por geração, filtro RSSI/antena, troca de modo, barreira de PARAR, shutdown, concorrência do estado de modo, captura para cadastro; modo DOCAS (mapa de portas, arbitragem de leitura cruzada, entrada e saída simultâneas, passagens por doca) |
 | `Persistence/` | Mesma suíte (contratos) contra SQLite real e SQL Server real; mais migrador SQL Server, precisão de data, views do BI. SQLite: criação, mudança de status, idempotência, anomalia, lote de 2000 leituras, consultas, cadastro de tags, migrações (banco v0.4, rollback, versão futura), tags cadastradas, movimentações e passagens |
 | `Readers/` | Parser `AsciiLine` (frames parciais, lixo), factory de protocolos, MockReader (fake de teste), comandos Gen2 do M100 e troca de parâmetros pelo transporte; R2000 multiporta e região; LLRP (codificação, capacidades, faixa Anatel, potência, relatórios) contra leitor LLRP falso em loopback (conexão, recusa, queda e reconexão, watchdog, extensão Impinj); Impinj IoT contra API REST falsa |
 | `Passage/` | Convergência, Chao2, silêncio, perda de dados; 50–100 tags no simulador Gen2 com Monte Carlo (400 passagens) |
@@ -628,6 +670,20 @@ KRF_TEST_SQLSERVER='Server=localhost,1433;User Id=sa;Password=<senha forte>;Trus
 5. Configuração local fica em `appsettings.Local.json`, nunca no `appsettings.json` versionado.
 
 ## Decisões e Desafios
+
+<details>
+<summary><b>Docas por antena com arbitragem de leitura cruzada</b></summary>
+
+<br/>
+
+O pedido era um programa e um leitor para entrada e saída, separadas por antena. Aplicar a direção da porta leitura a
+leitura seria o mais simples, mas no mesmo leitor as antenas de uma doca veem as tags da outra (lóbulo lateral,
+reflexão em metal) e cada leitura cruzada viraria uma movimentação falsa. A escolha foi reter a primeira leitura de
+cada EPC por 300 ms, decidir a doca pelo RSSI de pico e travar o EPC nela enquanto continuar sendo lido. Custo: 300 ms
+de atraso na primeira gravação, e um item que troca de doca em menos de `ZoneHoldMs` só é movimentado quando a doca
+anterior para de vê-lo.
+
+</details>
 
 <details>
 <summary><b>SQL Server como segundo banco, não substituto</b></summary>

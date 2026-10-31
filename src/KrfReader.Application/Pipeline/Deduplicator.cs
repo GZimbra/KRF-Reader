@@ -1,7 +1,9 @@
+using KrfReader.Domain;
+
 namespace KrfReader.Application.Pipeline;
 
 /// <summary>
-/// Deduplicação por EPC dentro de uma janela de tempo, por sessão de modo (geração).
+/// Deduplicação por EPC dentro de uma janela de tempo, por sessão de modo (geração) e direção.
 /// NÃO é thread-safe: cada worker tem a sua instância e o particionamento por hash do EPC
 /// garante que todas as leituras de um EPC passam pelo mesmo worker.
 /// </summary>
@@ -22,18 +24,26 @@ public sealed class Deduplicator
     /// Aceita se o EPC não foi aceito na MESMA geração dentro da janela. Geração diferente = nova sessão de modo.
     /// Leitura aceita passa a ser o "último aceito" do EPC.
     /// </summary>
-    public bool ShouldAccept(string epc, long generation, DateTime timestampUtc)
+    public bool ShouldAccept(string epc, long generation, DateTime timestampUtc) =>
+        ShouldAccept(epc, generation, null, timestampUtc);
+
+    /// <summary>
+    /// Idem, separando por direção: no modo POR ANTENA o mesmo EPC na outra doca (dentro da janela) é movimento novo,
+    /// não duplicata. A leitura cruzada já foi barrada antes, pelo <see cref="DirectionArbiter"/>.
+    /// </summary>
+    public bool ShouldAccept(string epc, long generation, OperationMode? direction, DateTime timestampUtc)
     {
         ArgumentNullException.ThrowIfNull(epc);
 
         if (_lastAccepted.TryGetValue(epc, out var last)
             && last.Generation == generation
+            && last.Direction == direction
             && timestampUtc - last.TimestampUtc < _window)
         {
             return false;
         }
 
-        _lastAccepted[epc] = new Entry(generation, timestampUtc);
+        _lastAccepted[epc] = new Entry(generation, direction, timestampUtc);
         return true;
     }
 
@@ -55,5 +65,5 @@ public sealed class Deduplicator
         return expired.Count;
     }
 
-    private readonly record struct Entry(long Generation, DateTime TimestampUtc);
+    private readonly record struct Entry(long Generation, OperationMode? Direction, DateTime TimestampUtc);
 }

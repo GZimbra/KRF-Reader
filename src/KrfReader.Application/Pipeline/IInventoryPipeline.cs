@@ -11,8 +11,11 @@ namespace KrfReader.Application.Pipeline;
 /// </summary>
 public interface IInventoryPipeline : IAsyncDisposable
 {
-    /// <summary>Modo ativo; null = parado.</summary>
+    /// <summary>Direção fixa do modo manual; null = parado OU modo POR ANTENA (ver <see cref="CurrentOperation"/>).</summary>
     OperationMode? CurrentMode { get; }
+
+    /// <summary>Operação ativa (manual ou POR ANTENA); null = parado.</summary>
+    InventoryOperation? CurrentOperation { get; }
 
     /// <summary>Incrementado a cada troca de modo/parada. Leituras carimbadas com geração antiga são descartadas.</summary>
     long Generation { get; }
@@ -28,6 +31,13 @@ public interface IInventoryPipeline : IAsyncDisposable
     /// Chamar com o mesmo modo já ativo é no-op.
     /// </summary>
     Task SetModeAsync(OperationMode mode, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Modo POR ANTENA: entrada e saída simultâneas no mesmo leitor; a direção de cada leitura vem da porta
+    /// (<paramref name="map"/>), com arbitragem de leitura cruzada entre as docas (<see cref="DirectionArbiter"/>).
+    /// Mesma semântica de geração de <see cref="SetModeAsync"/>. Mesmo mapa já ativo = no-op.
+    /// </summary>
+    Task SetAntennaModeAsync(AntennaDirectionMap map, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// PARAR: para o inventário, persiste as leituras pendentes da geração atual (que já tinham modo correto),
@@ -56,12 +66,16 @@ public interface IInventoryPipeline : IAsyncDisposable
 
     /// <summary>
     /// Leitura aceita com modo ativo (EPC normalizado, passou no filtro de RSSI/antena), ANTES da deduplicação:
-    /// todas as releituras chegam aqui. Disparado na thread do leitor: handler deve ser rápido.
+    /// todas as releituras chegam aqui. Modo manual: disparado na thread do leitor. POR ANTENA: disparado no worker,
+    /// depois da arbitragem de doca (leitura cruzada não chega). Handler deve ser rápido e thread-safe.
     /// </summary>
     event EventHandler<AcceptedRead>? ReadAccepted;
 
-    /// <summary>Mudança de modo (inclusive para null).</summary>
+    /// <summary>Mudança de operação, com o <see cref="CurrentMode"/> novo (null = parado ou POR ANTENA).</summary>
     event EventHandler<OperationMode?>? ModeChanged;
+
+    /// <summary>Mudança de operação (inclusive para null = parado). Disparado antes de <see cref="ModeChanged"/>.</summary>
+    event EventHandler<InventoryOperation?>? OperationChanged;
 
     /// <summary>Erro do leitor ou de persistência (não derruba o pipeline).</summary>
     event EventHandler<string>? Error;
@@ -81,9 +95,16 @@ public sealed record PipelineStats(
     long StaleDiscarded,
     long QueueDropped,
     long Persisted,
-    int DistinctEpcsSession);
+    int DistinctEpcsSession)
+{
+    /// <summary>POR ANTENA: leituras de porta sem doca (não movimentam estoque).</summary>
+    public long UnmappedAntenna { get; init; }
 
-/// <summary>Leitura aceita pelo filtro, com o modo vigente no recebimento.</summary>
+    /// <summary>POR ANTENA: leituras descartadas como cruzadas (EPC atribuído à outra doca).</summary>
+    public long CrossReads { get; init; }
+}
+
+/// <summary>Leitura aceita pelo filtro, com a direção vigente no recebimento (no POR ANTENA, a da doca que leu).</summary>
 public sealed class AcceptedRead(TagRead read, OperationMode mode) : EventArgs
 {
     public TagRead Read { get; } = read;

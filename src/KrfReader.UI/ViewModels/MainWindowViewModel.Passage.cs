@@ -31,7 +31,7 @@ public sealed partial class MainWindowViewModel
     [ObservableProperty] private bool _isVerdictOk;
     [ObservableProperty] private bool _isVerdictWarn;
     [ObservableProperty] private bool _isVerdictBad;
-    [ObservableProperty] private string _verdictHint = "Selecione ENTRADA ou SAÍDA e passe a carga pela antena.";
+    [ObservableProperty] private string _verdictHint = "Selecione ENTRADA, SAÍDA ou DOCAS e passe a carga pela antena.";
     [ObservableProperty] private int _passageTagCount;
     [ObservableProperty] private string _passageStableText = "0/0";
     [ObservableProperty] private string _passageMissedText = "—";
@@ -40,6 +40,14 @@ public sealed partial class MainWindowViewModel
     [ObservableProperty] private string _passageIssuesText = "";
     [ObservableProperty] private IReadOnlyList<PassageTagRow> _passageTags = [];
     [ObservableProperty] private string _inventoryControlText = "ANTICOLISÃO —";
+
+    /// <summary>DOCAS: resumo da passagem ao vivo da outra doca (o painel mostra uma de cada vez).</summary>
+    [ObservableProperty] private string _otherPassageText = "";
+
+    // Passagem exibida no painel: fica nela enquanto estiver ao vivo, para a tela não alternar entre as docas a cada rodada.
+    private long? _shownPassageId;
+    private bool _shownLive;
+    private readonly Dictionary<long, PassageSnapshot> _livePassages = [];
 
     private int _requiredStableRounds = 3;
 
@@ -111,8 +119,12 @@ public sealed partial class MainWindowViewModel
     private void OnPassageUpdated(object? sender, PassageSnapshot snapshot) =>
         Dispatcher.UIThread.Post(() =>
         {
-            if (ReferenceEquals(sender, _current?.Monitor))
+            if (!ReferenceEquals(sender, _current?.Monitor))
+                return;
+            _livePassages[snapshot.Id] = snapshot;
+            if (!_shownLive || _shownPassageId == snapshot.Id)
                 ShowPassage(snapshot);
+            UpdateOtherPassage();
         });
 
     private void OnPassageClosed(object? sender, PassageSnapshot snapshot)
@@ -120,7 +132,10 @@ public sealed partial class MainWindowViewModel
         _ = SavePassageAsync(snapshot);
         Dispatcher.UIThread.Post(() =>
         {
-            ShowPassage(snapshot);
+            _livePassages.Remove(snapshot.Id);
+            if (!_shownLive || _shownPassageId == snapshot.Id)
+                ShowPassage(snapshot);
+            UpdateOtherPassage();
             if (snapshot.Verdict != PassageVerdict.Confiavel)
                 ReportError($"Passagem #{snapshot.Id}: {VerdictLabel(snapshot.Verdict)}. {string.Join(" ", snapshot.Issues)}");
         });
@@ -141,10 +156,22 @@ public sealed partial class MainWindowViewModel
         }
     }
 
+    private void UpdateOtherPassage()
+    {
+        var others = _livePassages.Values.Where(p => p.Id != _shownPassageId).OrderBy(p => p.Id).ToArray();
+        OtherPassageText = others.Length == 0
+            ? ""
+            : "OUTRA DOCA · " + string.Join("  ·  ", others.Select(p =>
+                $"#{p.Id} {Display.Mode(p.Mode)} AO VIVO · {p.DistinctItems} itens · " +
+                (p.Verdict is PassageVerdict.NaoConvergiu ? "LENDO..." : VerdictLabel(p.Verdict))));
+    }
+
     private void ShowPassage(PassageSnapshot s)
     {
         HasPassage = true;
         var live = s.State == PassageState.Active;
+        _shownPassageId = s.Id;
+        _shownLive = live;
         PassageTitle = $"PASSAGEM #{s.Id} · {Display.Mode(s.Mode)}";
         PassageStateText = live
             ? "AO VIVO"
@@ -180,11 +207,15 @@ public sealed partial class MainWindowViewModel
     private void ResetPassage()
     {
         HasPassage = false;
+        _shownPassageId = null;
+        _shownLive = false;
+        _livePassages.Clear();
+        OtherPassageText = "";
         PassageTitle = "PASSAGEM";
         PassageStateText = "AGUARDANDO CARGA";
         VerdictText = "—";
         IsVerdictOk = IsVerdictWarn = IsVerdictBad = false;
-        VerdictHint = "Selecione ENTRADA ou SAÍDA e passe a carga pela antena.";
+        VerdictHint = "Selecione ENTRADA, SAÍDA ou DOCAS e passe a carga pela antena.";
         PassageTagCount = 0;
         PassageStableText = $"0/{_requiredStableRounds}";
         PassageMissedText = "—";

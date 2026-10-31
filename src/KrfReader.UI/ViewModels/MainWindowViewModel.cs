@@ -94,6 +94,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _readerAntennasText = string.Join(",", readerOptions.Antennas);
         _antennaPowerText = FormatAntennaPower(readerOptions.AntennaPowerDbm);
         _enforceAnatelBand = readerOptions.EnforceAnatelBand;
+        _dockEntradaText = string.Join(",", readerOptions.Docks?.EntradaAntennas ?? []);
+        _dockSaidaText = string.Join(",", readerOptions.Docks?.SaidaAntennas ?? []);
         _iotUseHttps = readerOptions.ImpinjIot.UseHttps;
         _iotUsername = readerOptions.ImpinjIot.Username;
         _iotPassword = readerOptions.ImpinjIot.Password;
@@ -111,36 +113,70 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     public ObservableCollection<LiveReadItem> LiveReads { get; } = [];
 
+    /// <summary>Direção fixa do modo manual; null = parado ou DOCAS (ver <see cref="IsDocksActive"/>).</summary>
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(ModeBannerText), nameof(ModeBannerHint), nameof(IsEntradaActive),
         nameof(IsSaidaActive), nameof(IsStopped), nameof(IsModeActive))]
     private OperationMode? _activeMode;
 
-    public string ModeBannerText => ActiveMode switch
+    /// <summary>Modo DOCAS (POR ANTENA): entrada e saída simultâneas, direção pela antena que leu.</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ModeBannerText), nameof(ModeBannerHint), nameof(IsStopped), nameof(IsModeActive))]
+    private bool _isDocksActive;
+
+    /// <summary>Docas do leitor conectado; null = leitor sem docas configuradas (só modo manual).</summary>
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(DocksKeyHint), nameof(DocksAvailable))]
+    [NotifyCanExecuteChangedFor(nameof(DocasCommand))]
+    private AntennaDirectionMap? _dockMap;
+
+    public bool DocksAvailable => DockMap is not null;
+
+    public string DocksKeyHint => DockMap is { } map ? map.Describe() : "CONFIGURAR ANTENAS";
+
+    public string ModeBannerText => (ActiveMode, IsDocksActive) switch
     {
-        OperationMode.Entrada => "ENTRADA",
-        OperationMode.Saida => "SAÍDA",
+        (OperationMode.Entrada, _) => "ENTRADA",
+        (OperationMode.Saida, _) => "SAÍDA",
+        (_, true) => "DOCAS",
         _ => "PARADO",
     };
 
-    public string ModeBannerHint => ActiveMode switch
+    public string ModeBannerHint => (ActiveMode, IsDocksActive) switch
     {
-        OperationMode.Entrada => "Tag lida → DENTRO do estoque",
-        OperationMode.Saida => "Tag lida → FORA do estoque",
+        (OperationMode.Entrada, _) => "Tag lida → DENTRO do estoque",
+        (OperationMode.Saida, _) => "Tag lida → FORA do estoque",
+        (_, true) => DockMap is { } map ? DescribeDocks(map) : "Direção pela antena que leu",
         _ => "Leituras não alteram o estoque",
     };
 
     public bool IsEntradaActive => ActiveMode == OperationMode.Entrada;
     public bool IsSaidaActive => ActiveMode == OperationMode.Saida;
-    public bool IsStopped => ActiveMode is null;
-    public bool IsModeActive => ActiveMode is not null;
+    public bool IsStopped => ActiveMode is null && !IsDocksActive;
+    public bool IsModeActive => !IsStopped;
+
+    private static string DescribeDocks(AntennaDirectionMap map)
+    {
+        var parts = new List<string>(2);
+        if (map.Entrada.Count > 0)
+            parts.Add($"ANT {string.Join(",", map.Entrada)} → DENTRO");
+        if (map.Saida.Count > 0)
+            parts.Add($"ANT {string.Join(",", map.Saida)} → FORA");
+        return string.Join(" · ", parts);
+    }
+
+    private void SetActiveOperation(InventoryOperation? operation)
+    {
+        ActiveMode = operation?.FixedMode;
+        IsDocksActive = operation?.IsByAntenna == true;
+    }
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(EntradaCommand), nameof(SaidaCommand), nameof(PararCommand), nameof(ApplyReaderCommand))]
+    [NotifyCanExecuteChangedFor(nameof(EntradaCommand), nameof(SaidaCommand), nameof(DocasCommand), nameof(PararCommand), nameof(ApplyReaderCommand))]
     private bool _isBusy;
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(EntradaCommand), nameof(SaidaCommand), nameof(PararCommand))]
+    [NotifyCanExecuteChangedFor(nameof(EntradaCommand), nameof(SaidaCommand), nameof(DocasCommand), nameof(PararCommand))]
     private bool _isPipelineRunning;
 
     [ObservableProperty] private bool _isShuttingDown;
@@ -164,6 +200,13 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanOperate))]
     private Task SaidaAsync() => RunModeCommandAsync(p => p.SetModeAsync(OperationMode.Saida), "iniciar SAÍDA");
 
+    private bool CanOperateDocks() => CanOperate() && DockMap is not null;
+
+    /// <summary>Entrada e saída ao mesmo tempo: a antena que leu define a direção (leitor multiporta).</summary>
+    [RelayCommand(CanExecute = nameof(CanOperateDocks))]
+    private Task DocasAsync() =>
+        DockMap is { } map ? RunModeCommandAsync(p => p.SetAntennaModeAsync(map), "iniciar DOCAS") : Task.CompletedTask;
+
     [RelayCommand(CanExecute = nameof(CanOperate))]
     private Task PararAsync() => RunModeCommandAsync(p => p.StopInventoryAsync(), "parar");
 
@@ -181,14 +224,16 @@ public sealed partial class MainWindowViewModel : ObservableObject
             if (handle is null || _shutdownStarted)
                 return;
             await Task.Run(() => action(handle.Pipeline));
-            ActiveMode = handle.Pipeline.CurrentMode;
-            StatusMessage = ActiveMode is null ? "Inventário parado." : $"{Display.Mode(ActiveMode)} ativo.";
+            SetActiveOperation(handle.Pipeline.CurrentOperation);
+            StatusMessage = IsStopped
+                ? "Inventário parado."
+                : IsDocksActive ? $"DOCAS ativo: {DockMap?.Describe()}." : $"{Display.Mode(ActiveMode)} ativo.";
         }
         catch (Exception ex)
         {
             ReportError($"Falha ao {description}: {ex.Message}");
             if (_current is { } h)
-                ActiveMode = h.Pipeline.CurrentMode;
+                SetActiveOperation(h.Pipeline.CurrentOperation);
         }
         finally
         {
@@ -308,10 +353,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
     /// </summary>
     private async Task<TagCaptureResult?> CaptureForCatalogAsync(Action<string> reportUnavailable)
     {
-        if (ActiveMode is not null)
+        if (IsModeActive)
         {
             reportUnavailable(
-                $"Modo {Display.Mode(ActiveMode)} ativo: a leitura seria gravada no estoque. Pressione PARAR na aba Operação antes de ler para cadastro.");
+                $"Modo {ModeBannerText} ativo: a leitura seria gravada no estoque. Pressione PARAR na aba Operação antes de ler para cadastro.");
             return null;
         }
 
@@ -402,6 +447,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [ObservableProperty] private string? _readerAntennasText;
     [ObservableProperty] private string? _antennaPowerText;
     [ObservableProperty] private bool _enforceAnatelBand;
+    [ObservableProperty] private string? _dockEntradaText;
+    [ObservableProperty] private string? _dockSaidaText;
     [ObservableProperty] private bool _iotUseHttps;
     [ObservableProperty] private string? _iotUsername;
     [ObservableProperty] private string? _iotPassword;
@@ -472,6 +519,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
             IotUseHttps = value.DefaultTcpPort != 80;
         PowerDbm = (decimal)value.DefaultPowerDbm;
         ReaderAntennasText = "1";
+        if (value.AntennaPorts < 2)
+            DockEntradaText = DockSaidaText = "";
         ConfigMessage = $"Padrões de \"{value.DisplayName}\" carregados. Clique em \"Aplicar leitor\" para conectar.";
     }
 
@@ -540,7 +589,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     [RelayCommand(CanExecute = nameof(CanApplyReader))]
     private async Task ApplyReaderAsync()
     {
-        if (ActiveMode is not null || _current?.Pipeline.CurrentMode is not null)
+        if (IsModeActive || _current?.Pipeline.CurrentOperation is not null)
         {
             ConfigMessage = "Há um modo ativo. Pressione PARAR na aba Operação antes de trocar o leitor.";
             return;
@@ -699,6 +748,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
         if (!TryBuildInventoryOptions(out var inventory, out error))
             return false;
 
+        if (!TryBuildDockOptions(antennas, out var docks, out error))
+            return false;
+
         options = new ReaderOptions
         {
             Model = SelectedReaderModel.Id,
@@ -719,9 +771,42 @@ public sealed partial class MainWindowViewModel : ObservableObject
             ImpinjIot = iot,
             ReconnectDelayMs = _baseReaderOptions.ReconnectDelayMs,
             Inventory = inventory,
+            Docks = docks,
         };
         error = "";
         return true;
+    }
+
+    /// <summary>
+    /// Docas por antena: vazio nas duas = só modo manual. Exige leitor multiporta (perfil de 1 porta é recusado:
+    /// com uma antena só não há como separar as docas).
+    /// </summary>
+    private bool TryBuildDockOptions(int[] activeAntennas, out DockOptions docks, out string error)
+    {
+        var current = _baseReaderOptions.Docks ?? new DockOptions();
+        docks = new DockOptions { ArbitrationMs = current.ArbitrationMs, ZoneHoldMs = current.ZoneHoldMs };
+        if (!TryParseAntennas(DockEntradaText, allowEmpty: true, out var entrada)
+            || !TryParseAntennas(DockSaidaText, allowEmpty: true, out var saida))
+        {
+            error = "Antenas das docas inválidas: use números separados por vírgula (ex.: 1,2).";
+            return false;
+        }
+
+        docks.EntradaAntennas = entrada;
+        docks.SaidaAntennas = saida;
+        if (!docks.IsConfigured)
+        {
+            error = "";
+            return true;
+        }
+
+        if (!SelectedReaderModel.IsCustom && SelectedReaderModel.AntennaPorts < 2)
+        {
+            error = $"\"{SelectedReaderModel.DisplayName}\" tem 1 porta de antena: docas exigem leitor multiporta. Deixe as docas vazias e use ENTRADA/SAÍDA manual.";
+            return false;
+        }
+
+        return AntennaDirectionMap.TryCreate(docks, activeAntennas, out _, out error);
     }
 
     /// <summary>Formato "porta:dBm" separado por vírgula/ponto e vírgula (ex.: "1:30; 2:27,5"). Vazio = mesma potência em todas.</summary>
@@ -861,6 +946,14 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Attach(handle);
         ReaderName = SafeReaderName(handle, options);
         ApplyFilter();
+        DockMap = null;
+        if (options.Docks is { IsConfigured: true } docks)
+        {
+            if (AntennaDirectionMap.TryCreate(docks, options.Antennas, out var map, out var dockError))
+                DockMap = map;
+            else
+                ReportError($"Docas desativadas: {dockError}");
+        }
 
         StatusMessage = $"Conectando a {ReaderName}...";
         try
@@ -869,8 +962,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
             handle.Monitor.SetMinRssi(MinRssi);
             handle.Monitor.Start();
             IsPipelineRunning = true;
-            ActiveMode = handle.Pipeline.CurrentMode;
-            StatusMessage = "Leitor pronto. Selecione ENTRADA ou SAÍDA.";
+            SetActiveOperation(handle.Pipeline.CurrentOperation);
+            StatusMessage = DockMap is null
+                ? "Leitor pronto. Selecione ENTRADA ou SAÍDA."
+                : "Leitor pronto. Selecione DOCAS (entrada e saída pela antena) ou ENTRADA/SAÍDA manual.";
             if (handle.Reader is IReaderInfoSource { Info: { } info })
                 ConfigMessage = $"Leitor identificado: {info.Description}";
         }
@@ -914,7 +1009,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _current = null;
         ResetSignal();
         ResetPassage();
-        ActiveMode = null;
+        SetActiveOperation(null);
+        DockMap = null;
         IsConnected = false;
         ConnectionText = "Desconectado";
     }
@@ -950,6 +1046,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     {
         EntradaCommand.NotifyCanExecuteChanged();
         SaidaCommand.NotifyCanExecuteChanged();
+        DocasCommand.NotifyCanExecuteChanged();
         PararCommand.NotifyCanExecuteChanged();
         ApplyReaderCommand.NotifyCanExecuteChanged();
     }
@@ -965,7 +1062,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private void Attach(PipelineHandle handle)
     {
         handle.Pipeline.BatchPersisted += OnBatchPersisted;
-        handle.Pipeline.ModeChanged += OnModeChanged;
+        handle.Pipeline.OperationChanged += OnOperationChanged;
         handle.Pipeline.Error += OnPipelineError;
         handle.Reader.TagRead += OnReaderTagRead;
         AttachPassage(handle.Monitor);
@@ -974,7 +1071,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private void Detach(PipelineHandle handle)
     {
         handle.Pipeline.BatchPersisted -= OnBatchPersisted;
-        handle.Pipeline.ModeChanged -= OnModeChanged;
+        handle.Pipeline.OperationChanged -= OnOperationChanged;
         handle.Pipeline.Error -= OnPipelineError;
         handle.Reader.TagRead -= OnReaderTagRead;
         DetachPassage(handle.Monitor);
@@ -994,11 +1091,11 @@ public sealed partial class MainWindowViewModel : ObservableObject
         Interlocked.Exchange(ref _countersDirty, 1);
     }
 
-    private void OnModeChanged(object? sender, OperationMode? mode) =>
+    private void OnOperationChanged(object? sender, InventoryOperation? operation) =>
         Dispatcher.UIThread.Post(() =>
         {
             if (ReferenceEquals(sender, _current?.Pipeline))
-                ActiveMode = mode;
+                SetActiveOperation(operation);
         });
 
     private void OnPipelineError(object? sender, string message) =>
@@ -1022,7 +1119,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 SessionDistinct = s.DistinctEpcsSession;
                 TechStatsText =
                     $"Brutas {s.RawReads:N0} · filtradas {s.FilteredOut:N0} · duplicadas {s.Duplicates:N0} · " +
-                    $"descartadas {s.StaleDiscarded:N0} · persistidas {s.Persisted:N0} · drops de fila {s.QueueDropped:N0}";
+                    $"descartadas {s.StaleDiscarded:N0} · persistidas {s.Persisted:N0} · drops de fila {s.QueueDropped:N0}" +
+                    (IsDocksActive ? $" · cruzadas {s.CrossReads:N0} · sem doca {s.UnmappedAntenna:N0}" : "");
 
                 UpdateInventoryControl(handle.Monitor);
                 var connected = handle.Reader.IsConnected;

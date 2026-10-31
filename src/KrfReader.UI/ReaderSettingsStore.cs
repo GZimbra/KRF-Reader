@@ -18,6 +18,7 @@ public static class ReaderSettingsStore
     {
         ArgumentNullException.ThrowIfNull(options);
         var inventory = options.Inventory ?? new InventoryOptions();
+        var docks = options.Docks ?? new DockOptions();
         return SaveSectionAsync(ReaderOptions.SectionName, new JsonObject
         {
             [nameof(ReaderOptions.Model)] = options.Model,
@@ -57,6 +58,13 @@ public static class ReaderSettingsStore
                 [nameof(ImpinjIotReaderOptions.PresetId)] = options.ImpinjIot.PresetId,
             },
             [nameof(ReaderOptions.ReconnectDelayMs)] = options.ReconnectDelayMs,
+            [nameof(ReaderOptions.Docks)] = new JsonObject
+            {
+                [nameof(DockOptions.EntradaAntennas)] = new JsonArray((docks.EntradaAntennas ?? []).Select(a => (JsonNode)a).ToArray()),
+                [nameof(DockOptions.SaidaAntennas)] = new JsonArray((docks.SaidaAntennas ?? []).Select(a => (JsonNode)a).ToArray()),
+                [nameof(DockOptions.ArbitrationMs)] = docks.ArbitrationMs,
+                [nameof(DockOptions.ZoneHoldMs)] = docks.ZoneHoldMs,
+            },
             [nameof(ReaderOptions.Inventory)] = new JsonObject
             {
                 [nameof(InventoryOptions.Session)] = inventory.Session.ToString(),

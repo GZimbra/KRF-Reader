@@ -46,6 +46,8 @@ public sealed class InventoryPipeline : IInventoryPipeline
     private long _duplicates;
     private long _staleDiscarded;
     private long _queueDropped;
+    private long _unmapped;
+    private long _crossReads;
     private long _persisted;
     private ConcurrentDictionary<string, byte> _distinctEpcs = new(StringComparer.Ordinal);
 
@@ -87,6 +89,8 @@ public sealed class InventoryPipeline : IInventoryPipeline
 
     public OperationMode? CurrentMode => _modeState.Mode;
 
+    public InventoryOperation? CurrentOperation => _modeState.Operation;
+
     public long Generation => _modeState.Generation;
 
     public bool IsRunning => _runtime is not null;
@@ -94,6 +98,8 @@ public sealed class InventoryPipeline : IInventoryPipeline
     public event EventHandler<BatchResult>? BatchPersisted;
 
     public event EventHandler<OperationMode?>? ModeChanged;
+
+    public event EventHandler<InventoryOperation?>? OperationChanged;
 
     public event EventHandler<AcceptedRead>? ReadAccepted;
 
@@ -144,23 +150,33 @@ public sealed class InventoryPipeline : IInventoryPipeline
         }
     }
 
-    public async Task SetModeAsync(OperationMode mode, CancellationToken cancellationToken = default)
+    public Task SetModeAsync(OperationMode mode, CancellationToken cancellationToken = default)
     {
         if (!Enum.IsDefined(mode))
             throw new ArgumentOutOfRangeException(nameof(mode), mode, "Modo inválido.");
+        return SetOperationAsync(InventoryOperation.Manual(mode), cancellationToken);
+    }
 
+    public Task SetAntennaModeAsync(AntennaDirectionMap map, CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(map);
+        return SetOperationAsync(InventoryOperation.ByAntenna(map), cancellationToken);
+    }
+
+    private async Task SetOperationAsync(InventoryOperation operation, CancellationToken cancellationToken)
+    {
         await _control.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             var rt = _runtime ?? throw new InvalidOperationException("Pipeline não iniciado: chame StartAsync antes.");
-            if (_modeState.Mode == mode)
+            if (_modeState.Operation == operation)
                 return;
 
-            var generation = _modeState.Set(mode);
+            var generation = _modeState.SetOperation(operation);
             rt.Persist.Writer.TryWrite(PipelineMessage.GenerationChanged);
-            _logger.LogInformation("Modo {Mode} ativo (geração {Generation})", mode, generation);
-            Raise(ModeChanged, mode);
+            _logger.LogInformation("Operação {Operation} ativa (geração {Generation})", operation, generation);
+            RaiseOperationChanged(operation);
 
             if (!_reader.IsInventoryRunning)
             {
@@ -170,8 +186,8 @@ public sealed class InventoryPipeline : IInventoryPipeline
                 }
                 catch (Exception ex)
                 {
-                    _modeState.Set(null);
-                    Raise(ModeChanged, null);
+                    _modeState.SetOperation(null);
+                    RaiseOperationChanged(null);
                     ReportError($"Falha ao iniciar inventário: {ex.Message}", ex);
                     throw;
                 }
@@ -191,7 +207,7 @@ public sealed class InventoryPipeline : IInventoryPipeline
             ObjectDisposedException.ThrowIf(_disposed, this);
             await StopReaderInventoryAsync(cancellationToken).ConfigureAwait(false);
 
-            if (_modeState.Mode is null)
+            if (_modeState.Operation is null)
                 return;
 
             try
@@ -202,9 +218,9 @@ public sealed class InventoryPipeline : IInventoryPipeline
             finally
             {
                 // Só depois da barreira: as leituras pendentes da geração atual já foram persistidas com o modo certo.
-                _modeState.Set(null);
+                _modeState.SetOperation(null);
                 _logger.LogInformation("Inventário parado");
-                Raise(ModeChanged, null);
+                RaiseOperationChanged(null);
             }
         }
         finally
@@ -252,7 +268,7 @@ public sealed class InventoryPipeline : IInventoryPipeline
             ObjectDisposedException.ThrowIf(_disposed, this);
             if (_runtime is null)
                 throw new InvalidOperationException("Pipeline não iniciado: chame StartAsync antes.");
-            if (_modeState.Mode is not null)
+            if (_modeState.Operation is not null)
                 throw new InvalidOperationException("Captura exige o inventário PARADO.");
 
             var session = new CaptureSession();
@@ -294,7 +310,11 @@ public sealed class InventoryPipeline : IInventoryPipeline
         Interlocked.Read(ref _staleDiscarded),
         Interlocked.Read(ref _queueDropped),
         Interlocked.Read(ref _persisted),
-        Volatile.Read(ref _distinctEpcs).Count);
+        Volatile.Read(ref _distinctEpcs).Count)
+    {
+        UnmappedAntenna = Interlocked.Read(ref _unmapped),
+        CrossReads = Interlocked.Read(ref _crossReads),
+    };
 
     // ---------------------------------------------------------------- produtor
 
@@ -305,16 +325,23 @@ public sealed class InventoryPipeline : IInventoryPipeline
         {
             Interlocked.Increment(ref _rawReads);
             var rt = _runtime;
-            var (mode, generation) = _modeState.Snapshot();
-            if (rt is not null && mode is null && _capture is { } capture)
+            var (operation, generation) = _modeState.SnapshotOperation();
+            if (rt is not null && operation is null && _capture is { } capture)
             {
                 OnCaptureRead(capture, e.Read);
                 return;
             }
 
-            if (rt is null || mode is null)
+            if (rt is null || operation is null)
             {
                 Interlocked.Increment(ref _staleDiscarded);
+                return;
+            }
+
+            // POR ANTENA: a direção é a da doca da porta; porta sem doca não movimenta estoque.
+            if (operation.Resolve(e.Read.AntennaId) is not { } mode)
+            {
+                Interlocked.Increment(ref _unmapped);
                 return;
             }
 
@@ -327,10 +354,11 @@ public sealed class InventoryPipeline : IInventoryPipeline
             }
 
             var read = epc == e.Read.Epc ? e.Read : e.Read with { Epc = epc };
-            if (ReadAccepted is { } accepted && _filter.Accept(read))
-                Raise(accepted, new AcceptedRead(read, mode.Value));
+            // POR ANTENA o evento sai do worker, depois da arbitragem: leitura cruzada não pode abrir passagem na outra doca.
+            if (!operation.IsByAntenna && ReadAccepted is { } accepted && _filter.Accept(read))
+                Raise(accepted, new AcceptedRead(read, mode));
 
-            if (!rt.Input.Writer.TryWrite(PipelineMessage.ForRead(new StampedRead(read, mode.Value, generation))))
+            if (!rt.Input.Writer.TryWrite(PipelineMessage.ForRead(new StampedRead(read, mode, generation))))
                 Interlocked.Increment(ref _queueDropped);
         }
         catch (Exception ex)
@@ -419,10 +447,12 @@ public sealed class InventoryPipeline : IInventoryPipeline
         var input = rt.Workers[index].Reader;
         var output = rt.Persist.Writer;
         var dedup = new Deduplicator(_dedupWindow);
+        var arbiter = new DirectionArbiter();
+        var released = new List<StampedRead>();
         var lastPurge = _time.GetUtcNow();
         try
         {
-            while (await input.WaitToReadAsync(ct).ConfigureAwait(false))
+            while (true)
             {
                 while (input.TryRead(out var msg))
                 {
@@ -430,6 +460,9 @@ public sealed class InventoryPipeline : IInventoryPipeline
                     {
                         if (msg.Kind != PipelineMessageKind.Read)
                         {
+                            // Barreira do PARAR: decide as arbitragens pendentes antes, para gravar tudo o que foi lido.
+                            if (msg.Kind == PipelineMessageKind.Barrier)
+                                await ReleaseAsync(arbiter.FlushAll(released)).ConfigureAwait(false);
                             await output.WriteAsync(msg, ct).ConfigureAwait(false);
                             continue;
                         }
@@ -438,11 +471,13 @@ public sealed class InventoryPipeline : IInventoryPipeline
                         if (now - lastPurge >= _purgeInterval)
                         {
                             dedup.Purge(now.UtcDateTime);
+                            arbiter.Purge(now.UtcDateTime);
                             lastPurge = now;
                         }
 
                         var stamped = msg.Read;
-                        if (stamped.Generation != _modeState.Generation)
+                        var (operation, generation) = _modeState.SnapshotOperation();
+                        if (stamped.Generation != generation)
                         {
                             Interlocked.Increment(ref _staleDiscarded);
                             continue;
@@ -454,22 +489,52 @@ public sealed class InventoryPipeline : IInventoryPipeline
                             continue;
                         }
 
-                        if (!dedup.ShouldAccept(stamped.Read.Epc, stamped.Generation, stamped.Read.TimestampUtc))
+                        if (operation?.Antennas is { } map)
                         {
-                            Interlocked.Increment(ref _duplicates);
+                            var cross = arbiter.Offer(stamped, map, now.UtcDateTime, released);
+                            await ReleaseAsync(cross).ConfigureAwait(false);
                             continue;
                         }
 
-                        rt.DistinctEpcs.TryAdd(stamped.Read.Epc, 0);
-                        if (!output.TryWrite(msg))
-                            await output.WriteAsync(msg, ct).ConfigureAwait(false);
+                        await AcceptAsync(stamped, raiseAccepted: false).ConfigureAwait(false);
                     }
                     catch (Exception ex) when (ex is not OperationCanceledException)
                     {
+                        released.Clear();
                         ReportError($"Worker {index}: {ex.Message}", ex);
                     }
                 }
+
+                await ReleaseAsync(arbiter.Expire(_time.GetUtcNow().UtcDateTime, released)).ConfigureAwait(false);
+
+                bool more;
+                if (arbiter.NextDeadline is not { } deadline)
+                {
+                    more = await input.WaitToReadAsync(ct).ConfigureAwait(false);
+                }
+                else
+                {
+                    var remaining = deadline - _time.GetUtcNow().UtcDateTime;
+                    if (remaining <= TimeSpan.Zero)
+                        continue;
+                    using var timeout = new CancellationTokenSource(remaining, _time);
+                    using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+                    try
+                    {
+                        more = await input.WaitToReadAsync(linked.Token).ConfigureAwait(false);
+                    }
+                    catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+                    {
+                        continue;
+                    }
+                }
+
+                if (!more)
+                    break;
             }
+
+            // Fila encerrada (shutdown): arbitragens pendentes ainda são da geração atual e devem ser gravadas.
+            await ReleaseAsync(arbiter.FlushAll(released)).ConfigureAwait(false);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -483,6 +548,49 @@ public sealed class InventoryPipeline : IInventoryPipeline
         {
             if (Interlocked.Decrement(ref rt.ActiveWorkers) == 0)
                 output.TryComplete();
+        }
+
+        // Leituras liberadas pela arbitragem: descarte de geração velha, ReadAccepted (passagem) e dedup.
+        async Task ReleaseAsync(int crossReads)
+        {
+            if (crossReads > 0)
+                Interlocked.Add(ref _crossReads, crossReads);
+            if (released.Count == 0)
+                return;
+            try
+            {
+                foreach (var r in released)
+                {
+                    if (r.Generation != _modeState.Generation)
+                    {
+                        Interlocked.Increment(ref _staleDiscarded);
+                        continue;
+                    }
+
+                    await AcceptAsync(r, raiseAccepted: true).ConfigureAwait(false);
+                }
+            }
+            finally
+            {
+                released.Clear();
+            }
+        }
+
+        async Task AcceptAsync(StampedRead r, bool raiseAccepted)
+        {
+            if (raiseAccepted && ReadAccepted is { } accepted)
+                Raise(accepted, new AcceptedRead(r.Read, r.Mode));
+
+            if (!dedup.ShouldAccept(r.Read.Epc, r.Generation, r.Mode, r.Read.TimestampUtc))
+            {
+                Interlocked.Increment(ref _duplicates);
+                return;
+            }
+
+            rt.DistinctEpcs.TryAdd(r.Read.Epc, 0);
+            var msg = PipelineMessage.ForRead(r);
+            if (!output.TryWrite(msg))
+                await output.WriteAsync(msg, ct).ConfigureAwait(false);
         }
     }
 
@@ -632,18 +740,34 @@ public sealed class InventoryPipeline : IInventoryPipeline
             return;
         }
 
-        var mode = buffer.Mode;
         var generation = buffer.Generation;
-        var reads = buffer.Drain();
+        // POR ANTENA o lote mistura direções: aplica trechos consecutivos de mesma direção, em ordem de chegada,
+        // para o mesmo EPC entrar e depois sair (ou o contrário) na sequência em que foi lido.
+        foreach (var (mode, reads) in buffer.DrainRuns())
+        {
+            if (!await ApplyRunAsync(mode, reads, generation, ct).ConfigureAwait(false))
+                return;
+        }
+    }
 
+    /// <summary>Aplica um trecho com retentativa. false = geração trocou (o resto do lote também é descartado).</summary>
+    private async Task<bool> ApplyRunAsync(OperationMode mode, TagRead[] reads, long generation, CancellationToken ct)
+    {
         for (var attempt = 0; ; attempt++)
         {
+            if (generation != _modeState.Generation)
+            {
+                Interlocked.Add(ref _staleDiscarded, reads.Length);
+                _logger.LogWarning("Modo trocou antes da gravação: lote de {Count} leituras descartado", reads.Length);
+                return false;
+            }
+
             try
             {
                 var result = await _repository.ApplyBatchAsync(mode, reads, ct).ConfigureAwait(false);
                 Interlocked.Add(ref _persisted, reads.Length);
                 Raise(BatchPersisted, result ?? BatchResult.Empty);
-                return;
+                return true;
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -659,17 +783,11 @@ public sealed class InventoryPipeline : IInventoryPipeline
                 {
                     _logger.LogError("Lote descartado após {Attempts} tentativas: {Count} leituras perdidas",
                         attempt + 1, reads.Length);
-                    return;
+                    return true;
                 }
             }
 
             await Task.Delay(RetryDelays[attempt], _time, ct).ConfigureAwait(false);
-            if (generation != _modeState.Generation)
-            {
-                Interlocked.Add(ref _staleDiscarded, reads.Length);
-                _logger.LogWarning("Modo trocou durante retentativa: lote de {Count} leituras descartado", reads.Length);
-                return;
-            }
         }
     }
 
@@ -756,10 +874,10 @@ public sealed class InventoryPipeline : IInventoryPipeline
             if (rt.Tasks.All(t => t.IsCompleted))
                 rt.Cts.Dispose();
 
-            if (_modeState.Mode is not null)
+            if (_modeState.Operation is not null)
             {
-                _modeState.Set(null);
-                Raise(ModeChanged, null);
+                _modeState.SetOperation(null);
+                RaiseOperationChanged(null);
             }
 
             _logger.LogInformation("Pipeline encerrado. {Stats}", GetStats());
@@ -806,8 +924,16 @@ public sealed class InventoryPipeline : IInventoryPipeline
         Interlocked.Exchange(ref _duplicates, 0);
         Interlocked.Exchange(ref _staleDiscarded, 0);
         Interlocked.Exchange(ref _queueDropped, 0);
+        Interlocked.Exchange(ref _unmapped, 0);
+        Interlocked.Exchange(ref _crossReads, 0);
         Interlocked.Exchange(ref _persisted, 0);
         Volatile.Write(ref _distinctEpcs, new ConcurrentDictionary<string, byte>(StringComparer.Ordinal));
+    }
+
+    private void RaiseOperationChanged(InventoryOperation? operation)
+    {
+        Raise(OperationChanged, operation);
+        Raise(ModeChanged, operation?.FixedMode);
     }
 
     private void ReportError(string message, Exception? exception)
@@ -845,14 +971,13 @@ public sealed class InventoryPipeline : IInventoryPipeline
         public int ActiveWorkers = workers.Length;
     }
 
-    /// <summary>Buffer de lote: todas as leituras são da mesma geração (logo, do mesmo modo).</summary>
+    /// <summary>Buffer de lote: todas as leituras são da mesma geração; a direção pode variar (modo POR ANTENA).</summary>
     private sealed class BatchBuffer
     {
-        private readonly List<TagRead> _items = [];
+        private readonly List<StampedRead> _items = [];
 
         public int Count => _items.Count;
         public long Generation { get; private set; }
-        public OperationMode Mode { get; private set; }
         public DateTimeOffset FirstItemAt { get; private set; }
 
         public void Add(in StampedRead read, DateTimeOffset now)
@@ -860,22 +985,34 @@ public sealed class InventoryPipeline : IInventoryPipeline
             if (_items.Count == 0)
             {
                 Generation = read.Generation;
-                Mode = read.Mode;
                 FirstItemAt = now;
             }
-            else if (read.Generation != Generation || read.Mode != Mode)
+            else if (read.Generation != Generation)
             {
-                throw new InvalidOperationException("Lote misturando gerações/modos.");
+                throw new InvalidOperationException("Lote misturando gerações.");
             }
 
-            _items.Add(read.Read);
+            _items.Add(read);
         }
 
-        public TagRead[] Drain()
+        /// <summary>Esvazia o buffer em trechos consecutivos de mesma direção, na ordem de chegada.</summary>
+        public List<(OperationMode Mode, TagRead[] Reads)> DrainRuns()
         {
-            var reads = _items.ToArray();
+            var runs = new List<(OperationMode, TagRead[])>();
+            var start = 0;
+            for (var i = 1; i <= _items.Count; i++)
+            {
+                if (i < _items.Count && _items[i].Mode == _items[start].Mode)
+                    continue;
+                var reads = new TagRead[i - start];
+                for (var j = start; j < i; j++)
+                    reads[j - start] = _items[j].Read;
+                runs.Add((_items[start].Mode, reads));
+                start = i;
+            }
+
             _items.Clear();
-            return reads;
+            return runs;
         }
 
         public void Clear() => _items.Clear();
